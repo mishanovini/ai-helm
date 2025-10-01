@@ -192,18 +192,30 @@ export async function optimizePrompt(
   sentiment: string,
   style: string
 ): Promise<PromptOptimization> {
-  const prompt = `Optimize this user prompt for better AI responses. Add:
-- Clear instructions based on intent
-- Appropriate context
-- Format specifications if needed
-- Style guidance
+  const prompt = `Your task is to REWRITE and ENHANCE the user's prompt to get better results from an AI model.
 
-Intent: ${intent}
-Sentiment: ${sentiment}
-Style: ${style}
-Original message: "${userMessage}"
+IMPORTANT: Do NOT answer the user's question. Do NOT provide the response they're looking for. ONLY rewrite their prompt to make it clearer and more effective.
 
-Provide the optimized prompt only, no explanations or meta-commentary.`;
+Original user prompt: "${userMessage}"
+
+Context about the prompt:
+- Intent: ${intent}
+- Sentiment: ${sentiment}
+- Desired style: ${style}
+
+Rewrite the prompt by:
+1. Making the request more specific and clear
+2. Adding helpful context or constraints
+3. Specifying the desired output format if appropriate
+4. Adding style/tone guidance if needed
+5. Breaking complex requests into clear steps
+
+Example transformations:
+- "Explain quantum mechanics" → "Explain quantum mechanics in simple terms for a beginner, using everyday analogies. Focus on the key concepts like superposition and entanglement."
+- "Write code" → "Write a Python function that takes a list of numbers and returns the average. Include error handling for empty lists and non-numeric values. Add docstring and comments."
+- "Tell me about dogs" → "Provide a comprehensive overview of dogs as pets, including: common breeds, care requirements, training basics, and health considerations. Format as sections with bullet points."
+
+Return ONLY the enhanced/rewritten prompt. Do not include explanations, meta-commentary, or actual answers to the question.`;
 
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-lite",
