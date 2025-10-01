@@ -42,7 +42,7 @@ export default function Home() {
     
     try {
       // Step 1: Call Gemini analysis API
-      addLog("Analyzing user prompt with Gemini Flash 2.5...", "info");
+      addLog("Analyzing user prompt with Gemini 2.5 Flash-Lite...", "info");
       
       const response = await fetch("/api/analyze", {
         method: "POST",

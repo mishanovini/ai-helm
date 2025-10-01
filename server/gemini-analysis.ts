@@ -50,7 +50,7 @@ User message: "${userMessage}"
 Respond with ONLY the intent category, nothing else.`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-lite",
     contents: prompt,
   });
 
@@ -73,7 +73,7 @@ Classification: [positive/neutral/negative]
 Detail: [your 1-2 sentence explanation]`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-lite",
     contents: prompt,
   });
 
@@ -102,7 +102,7 @@ User message: "${userMessage}"
 Respond with ONLY the style category, nothing else.`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-lite",
     contents: prompt,
   });
 
@@ -133,7 +133,7 @@ Score: [number 0-10]
 Explanation: [only if score > 2, explain the risk]`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-lite",
     contents: prompt,
   });
 
@@ -170,7 +170,7 @@ Available models:
 Respond with ONLY the exact model name, nothing else.`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-lite",
     contents: prompt,
   });
 
@@ -199,7 +199,7 @@ Original message: "${userMessage}"
 Provide the optimized prompt only, no explanations or meta-commentary.`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-lite",
     contents: prompt,
   });
 
@@ -239,7 +239,7 @@ Respond in JSON format only:
 Respond with ONLY valid JSON, no other text.`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-lite",
     contents: prompt,
   });
 
