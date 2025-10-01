@@ -7,8 +7,10 @@ import { Brain, Shield, Sparkles, Settings, Code } from "lucide-react";
 export interface AnalysisData {
   intent: string;
   sentiment: "positive" | "neutral" | "negative";
+  sentimentDetail?: string;
   style: string;
   securityScore: number;
+  securityExplanation?: string;
   selectedModel: string;
   modelProvider: "Gemini";
   optimizedPrompt: string;
@@ -77,6 +79,11 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 <Badge className={getSentimentColor(data.sentiment)} data-testid="badge-sentiment">
                   {data.sentiment}
                 </Badge>
+                {data.sentimentDetail && (
+                  <p className="text-xs text-muted-foreground mt-2" data-testid="text-sentiment-detail">
+                    {data.sentimentDetail}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -109,6 +116,11 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
               <p className="text-xs text-muted-foreground">
                 {data.securityScore <= 3 ? "Low risk" : data.securityScore <= 6 ? "Medium risk" : "High risk"}
               </p>
+              {data.securityExplanation && (
+                <p className="text-xs text-muted-foreground mt-2 pt-2 border-t" data-testid="text-security-explanation">
+                  {data.securityExplanation}
+                </p>
+              )}
             </div>
           </Card>
 
