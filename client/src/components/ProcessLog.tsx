@@ -54,9 +54,9 @@ export default function ProcessLog({ logs }: ProcessLogProps) {
   };
 
   return (
-    <Card className="p-4">
+    <Card className="p-4 flex flex-col min-h-0 flex-1">
       <h3 className="text-sm font-semibold mb-3">Process Log</h3>
-      <ScrollArea className="h-64" ref={scrollRef}>
+      <ScrollArea className="flex-1" ref={scrollRef}>
         <div className="space-y-1">
           {logs.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">

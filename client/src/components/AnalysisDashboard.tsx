@@ -196,7 +196,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
             </label>
             {data.optimizedPrompt ? (
               <ScrollArea className="h-24">
-                <pre className="text-xs font-mono bg-muted/50 p-2 rounded border" data-testid="text-optimized-prompt">
+                <pre className="text-xs font-mono bg-muted/50 p-2 rounded border whitespace-pre-wrap break-words" data-testid="text-optimized-prompt">
                   {data.optimizedPrompt}
                 </pre>
               </ScrollArea>
