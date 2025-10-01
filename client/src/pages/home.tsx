@@ -70,12 +70,11 @@ export default function Home() {
 
     // Step 4: Model selection
     const models = useDeepResearch 
-      ? ["Gemini Deep Thinking", "o1-preview"]
-      : ["GPT-4 Turbo", "Claude 3.5 Sonnet", "Gemini 1.5 Pro", "Gemini 2.0 Flash"];
-    const providers: Array<"OpenAI" | "Anthropic" | "Gemini"> = ["OpenAI", "Anthropic", "Gemini"];
+      ? ["Gemini 2.0 Flash Thinking", "Gemini 1.5 Pro (Deep Research)"]
+      : ["Gemini 2.0 Flash", "Gemini 1.5 Pro", "Gemini 1.5 Flash", "Gemini 1.0 Pro (Imagen)"];
     
     const selectedModel = models[Math.floor(Math.random() * models.length)];
-    const modelProvider = providers[Math.floor(Math.random() * providers.length)];
+    const modelProvider = "Gemini" as const;
     
     addLog(`Model selected: ${selectedModel}`, "info");
     await new Promise(resolve => setTimeout(resolve, 300));

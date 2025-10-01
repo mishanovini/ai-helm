@@ -10,7 +10,7 @@ export interface AnalysisData {
   style: string;
   securityScore: number;
   selectedModel: string;
-  modelProvider: "OpenAI" | "Anthropic" | "Gemini";
+  modelProvider: "Gemini";
   optimizedPrompt: string;
   parameters: Record<string, number | string>;
 }
