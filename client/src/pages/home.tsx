@@ -37,6 +37,140 @@ export default function Home() {
     }]);
   };
 
+  const analyzeIntent = (message: string): string => {
+    const lower = message.toLowerCase();
+    
+    if (lower.match(/\b(write|create|generate|make|build|develop)\s+(code|program|script|function|app)/)) {
+      return "Code generation";
+    } else if (lower.match(/\b(explain|what is|how does|describe|tell me about)/)) {
+      return "Concept explanation";
+    } else if (lower.match(/\b(write|create|generate|compose)\s+(story|poem|essay|article|content)/)) {
+      return "Creative writing";
+    } else if (lower.match(/\b(summarize|summary|tldr|key points|main ideas)/)) {
+      return "Text summarization";
+    } else if (lower.match(/\b(analyze|evaluate|assess|review|compare)/)) {
+      return "Analysis & reasoning";
+    } else if (lower.match(/\b(solve|calculate|compute|find|determine)\b/)) {
+      return "Problem solving";
+    } else if (lower.includes("?")) {
+      return "Question answering";
+    } else {
+      return "General assistance";
+    }
+  };
+
+  const analyzeSentiment = (message: string): "positive" | "neutral" | "negative" => {
+    const lower = message.toLowerCase();
+    const positiveWords = ["please", "thanks", "help", "appreciate", "love", "great", "awesome", "excited"];
+    const negativeWords = ["problem", "issue", "broken", "error", "wrong", "bad", "frustrated", "urgent"];
+    
+    const positiveCount = positiveWords.filter(word => lower.includes(word)).length;
+    const negativeCount = negativeWords.filter(word => lower.includes(word)).length;
+    
+    if (positiveCount > negativeCount) return "positive";
+    if (negativeCount > positiveCount) return "negative";
+    return "neutral";
+  };
+
+  const analyzeStyle = (message: string): string => {
+    const lower = message.toLowerCase();
+    const hasFormalIndicators = lower.match(/\b(please|kindly|would|could|may|require|request)\b/);
+    const hasCasualIndicators = lower.match(/\b(hey|hi|yeah|gonna|wanna|cool|awesome)\b/);
+    const hasTechnicalTerms = lower.match(/\b(algorithm|function|database|api|framework|implementation|optimization)\b/);
+    
+    if (hasTechnicalTerms) return "Technical and precise";
+    if (hasFormalIndicators && !hasCasualIndicators) return "Formal and detailed";
+    if (hasCasualIndicators) return "Casual and conversational";
+    return "Clear and balanced";
+  };
+
+  const analyzeSecurityRisk = (message: string): number => {
+    const lower = message.toLowerCase();
+    const highRiskPatterns = [
+      /\b(ignore|bypass|override)\s+(previous|above|instructions|rules|guidelines)\b/,
+      /\b(jailbreak|hack|exploit|inject|malicious)\b/,
+      /\b(generate|create)\s+(virus|malware|exploit)\b/,
+      /\b(personal|private|confidential)\s+(information|data|password)\b/
+    ];
+    
+    const mediumRiskPatterns = [
+      /\b(password|credit card|ssn|social security)\b/,
+      /\b(pretend|act as|roleplay)\b/,
+    ];
+    
+    for (const pattern of highRiskPatterns) {
+      if (pattern.test(lower)) return 8 + Math.floor(Math.random() * 3); // 8-10
+    }
+    
+    for (const pattern of mediumRiskPatterns) {
+      if (pattern.test(lower)) return 4 + Math.floor(Math.random() * 3); // 4-6
+    }
+    
+    return Math.floor(Math.random() * 3); // 0-2 for normal queries
+  };
+
+  const selectOptimalModel = (intent: string, messageLength: number, useDeepResearch: boolean): string => {
+    if (useDeepResearch) {
+      return messageLength > 500 || intent.includes("Analysis") || intent.includes("reasoning") 
+        ? "Gemini 2.5 Pro Deep Think" 
+        : "Gemini 2.5 Pro";
+    }
+    
+    if (intent === "Code generation") return "Gemini 2.5 Pro";
+    if (intent.includes("Creative")) return "Gemini 2.5 Pro";
+    if (intent.includes("Analysis") || intent.includes("reasoning")) return "Gemini 2.5 Pro";
+    if (messageLength > 1000) return "Gemini 2.5 Pro";
+    if (intent.includes("Question") || intent.includes("explanation")) return "Gemini 2.5 Flash";
+    
+    return "Gemini 2.5 Flash-Lite";
+  };
+
+  const optimizePromptForModel = (userMessage: string, intent: string, sentiment: string, style: string): string => {
+    let systemInstructions = "";
+    
+    if (intent.includes("Code")) {
+      systemInstructions = "Provide clean, well-commented code with explanations. Follow best practices and include error handling.";
+    } else if (intent.includes("Creative")) {
+      systemInstructions = "Be creative, engaging, and original. Use vivid descriptions and compelling narrative.";
+    } else if (intent.includes("explanation")) {
+      systemInstructions = "Explain clearly with examples. Break down complex concepts into understandable parts.";
+    } else if (intent.includes("Analysis")) {
+      systemInstructions = "Provide thorough analysis with logical reasoning. Consider multiple perspectives and provide evidence.";
+    }
+    
+    if (sentiment === "negative") {
+      systemInstructions += " Be empathetic and solution-focused.";
+    }
+    
+    return `${userMessage}\n\n[System: ${systemInstructions} Respond in a ${style.toLowerCase()} manner.]`;
+  };
+
+  const tuneParameters = (intent: string, sentiment: string) => {
+    let temperature = 0.7;
+    let top_p = 1.0;
+    let max_tokens = 1000;
+    
+    if (intent.includes("Creative")) {
+      temperature = 0.95;
+      max_tokens = 2000;
+    } else if (intent.includes("Code")) {
+      temperature = 0.4;
+      top_p = 0.95;
+      max_tokens = 1500;
+    } else if (intent.includes("Analysis") || intent.includes("reasoning")) {
+      temperature = 0.6;
+      max_tokens = 1500;
+    } else if (intent.includes("explanation")) {
+      temperature = 0.7;
+      max_tokens = 1000;
+    } else if (intent.includes("summarization")) {
+      temperature = 0.5;
+      max_tokens = 500;
+    }
+    
+    return { temperature, top_p, max_tokens };
+  };
+
   const simulateAnalysis = async (userMessage: string, useDeepResearch: boolean = false) => {
     setIsProcessing(true);
     
@@ -44,36 +178,22 @@ export default function Home() {
     addLog("Analyzing user prompt...", "info");
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Step 2: Intent & Sentiment
-    const intents = [
-      "Explain a concept",
-      "Generate creative content",
-      "Write code",
-      "Answer a question",
-      "Summarize information"
-    ];
-    const sentiments: Array<"positive" | "neutral" | "negative"> = ["positive", "neutral", "negative"];
-    const styles = ["Formal and detailed", "Casual and conversational", "Technical and precise", "Educational, simplified"];
-    
-    const intent = intents[Math.floor(Math.random() * intents.length)];
-    const sentiment = sentiments[Math.floor(Math.random() * sentiments.length)];
-    const style = styles[Math.floor(Math.random() * styles.length)];
+    // Step 2: Intent & Sentiment Analysis
+    const intent = analyzeIntent(userMessage);
+    const sentiment = analyzeSentiment(userMessage);
+    const style = analyzeStyle(userMessage);
     
     addLog(`Intent detected: ${intent}`, "success");
     addLog(`Sentiment detected: ${sentiment}`, "success");
     await new Promise(resolve => setTimeout(resolve, 300));
 
     // Step 3: Security analysis
-    const securityScore = Math.floor(Math.random() * 4); // 0-3 for demo (low risk)
+    const securityScore = analyzeSecurityRisk(userMessage);
     addLog(`Security risk assessed: ${securityScore}/10`, "success");
     await new Promise(resolve => setTimeout(resolve, 300));
 
     // Step 4: Model selection
-    const models = useDeepResearch 
-      ? ["Gemini 2.5 Pro Deep Think", "Gemini 2.5 Pro"]
-      : ["Gemini 2.5 Flash", "Gemini 2.5 Flash-Lite", "Gemini 2.5 Pro", "Gemini 2.0 Flash"];
-    
-    const selectedModel = models[Math.floor(Math.random() * models.length)];
+    const selectedModel = selectOptimalModel(intent, userMessage.length, useDeepResearch);
     const modelProvider = "Gemini" as const;
     
     addLog(`Model selected: ${selectedModel}`, "info");
@@ -82,15 +202,10 @@ export default function Home() {
     // Step 5: Optimize prompt
     addLog("Optimizing prompt...", "info");
     await new Promise(resolve => setTimeout(resolve, 400));
-    const optimizedPrompt = `${userMessage}\n\nPlease provide a ${style.toLowerCase()} response that addresses this ${intent.toLowerCase()}.`;
+    const optimizedPrompt = optimizePromptForModel(userMessage, intent, sentiment, style);
 
     // Step 6: Set parameters
-    const temperature = intent.includes("creative") ? 0.9 : 0.7;
-    const parameters = {
-      temperature,
-      top_p: 1.0,
-      max_tokens: 1000
-    };
+    const parameters = tuneParameters(intent, sentiment);
 
     // Update analysis dashboard
     setAnalysisData({
