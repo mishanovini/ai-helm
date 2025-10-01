@@ -15,11 +15,13 @@ interface ProcessLogProps {
 }
 
 export default function ProcessLog({ logs }: ProcessLogProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    // Find the viewport element inside ScrollArea (Radix UI structure)
+    const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
     }
   }, [logs]);
 
@@ -54,33 +56,35 @@ export default function ProcessLog({ logs }: ProcessLogProps) {
   };
 
   return (
-    <Card className="p-4 flex flex-col min-h-0 flex-1">
+    <Card className="p-4 h-full flex flex-col">
       <h3 className="text-sm font-semibold mb-3">Process Log</h3>
-      <ScrollArea className="flex-1" ref={scrollRef}>
-        <div className="space-y-1">
-          {logs.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-8">
-              No activity yet
-            </p>
-          ) : (
-            logs.map((log) => (
-              <div
-                key={log.id}
-                className="flex items-start gap-3 p-2 hover-elevate rounded text-xs"
-                data-testid={`log-entry-${log.type}`}
-              >
-                {getIcon(log.type)}
-                <div className="flex-1 min-w-0">
-                  <span className="font-mono text-muted-foreground mr-2">
-                    {log.timestamp}
-                  </span>
-                  <span className={getTextColor(log.type)}>{log.message}</span>
+      <div className="flex-1 min-h-0">
+        <ScrollArea className="h-full pr-4" ref={scrollAreaRef}>
+          <div className="space-y-1">
+            {logs.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">
+                No activity yet
+              </p>
+            ) : (
+              logs.map((log) => (
+                <div
+                  key={log.id}
+                  className="flex items-start gap-3 p-2 hover-elevate rounded text-xs"
+                  data-testid={`log-entry-${log.type}`}
+                >
+                  {getIcon(log.type)}
+                  <div className="flex-1 min-w-0">
+                    <span className="font-mono text-muted-foreground mr-2">
+                      {log.timestamp}
+                    </span>
+                    <span className={getTextColor(log.type)}>{log.message}</span>
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-        </div>
-      </ScrollArea>
+              ))
+            )}
+          </div>
+        </ScrollArea>
+      </div>
     </Card>
   );
 }
