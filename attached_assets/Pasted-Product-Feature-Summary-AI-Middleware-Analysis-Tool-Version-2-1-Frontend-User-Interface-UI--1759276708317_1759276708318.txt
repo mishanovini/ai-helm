@@ -1,0 +1,104 @@
+Product Feature Summary: AI Middleware & Analysis Tool (Version 2)
+1. Frontend User Interface (UI)
+
+Primary Chat Interface:
+
+A standard text input box for users to enter their prompts.
+
+A conversation history view that displays the user's prompts and the final AI-generated responses.
+
+Real-Time Analysis & Logging Dashboard:
+
+A dedicated panel, visible alongside the chat interface, that updates in real-time as the middleware processes a request.
+
+Data Display Fields: This panel must have clearly labeled, distinct fields that are populated with the following data:
+
+Intent: The identified goal of the user's prompt.
+
+Sentiment: The detected sentiment (e.g., positive, neutral, negative).
+
+Style: The inferred preferred response style (e.g., formal, casual).
+
+Security Score: The 0-10 risk rating of the user's prompt.
+
+Selected Model: The name of the AI model chosen for the task.
+
+Optimized Prompt: The full text of the rewritten/optimized prompt being sent to the AI model.
+
+Parameters: The key-value pairs of the model parameters being used (e.g., temperature: 0.7, top_p: 1.0).
+
+Real-time Process Log:
+
+A scrolling log or feed within the dashboard that provides a step-by-step transcript of the middleware's actions as they happen.
+
+Example log entries: "Analyzing user prompt...", "Sentiment detected: Neutral", "Security risk assessed: 1/10", "Model selected: ModelB-Technical", "Optimizing prompt...", "Sending request to model...", "Response received from model...", "Validating response...", "Validation passed.", "Displaying final response."
+
+2. Middleware Engine: Pre-Processing Pipeline (Analyzes User Prompt)
+
+Step 1: Intent & Sentiment Analysis:
+
+Determines the user's primary goal (e.g., "summarize text," "write code," "answer a question").
+
+Analyzes the sentiment of the prompt (positive, neutral, negative).
+
+Infers the user's preferred response style (e.g., formal, casual, detailed, concise).
+
+Step 2: Security & Risk Analysis (User Prompt):
+
+Rates the user's prompt on a scale of 0-10 for potential security risks, including harmful content, bias, or attempts to exploit the system.
+
+Generates a brief justification for the score.
+
+Step 3: Optimal AI Model Selection:
+
+Based on the intent, sentiment, and security analysis, selects the most appropriate AI model from a predefined list (e.g., a model for creative tasks, a model for technical questions, a "Deep Research" model).
+
+Step 4: Dynamic Prompt Optimization:
+
+Rewrites the original user prompt to be clearer, more specific, and optimized for the selected AI model.
+
+This step should incorporate the analysis from the previous steps (e.g., adding instructions for the LLM to be more empathetic if the sentiment was negative).
+
+Step 5: Parameter Tuning:
+
+Adjusts the selected model's parameters (e.g., temperature, top_p) for an optimal response based on the analysis (e.g., higher temperature for creative tasks, lower for factual recall).
+
+Step 6: "Deep Research" User Confirmation Flow:
+
+If the "Deep Research" model is selected, the system must estimate the required time.
+
+It must then pause the process and prompt the user for confirmation (e.g., "This request may take up to 5 minutes. Do you wish to proceed?"), allowing them to agree or choose a faster alternative.
+
+3. Middleware Engine: Response Generation
+
+Sends the optimized prompt and tuned parameters to the selected AI model to generate a response.
+
+4. Middleware Engine: Post-Processing Pipeline (Analyzes AI Response)
+
+Step 1: Response Validation:
+
+Evaluates whether the AI's response accurately and completely addresses the user's original intent.
+
+If the response is poor or insufficient, the system must trigger a refinement loop, potentially by refining the prompt based on the validation feedback and trying again.
+
+Step 2: Security & Risk Analysis (AI Response):
+
+Rates the AI-generated response on a scale of 0-10 for potential security concerns.
+
+5. Backend & Data
+
+Historical Logging:
+
+A database must be used to keep a complete history of every interaction.
+
+Each log entry must include:
+
+Timestamp
+
+Original user prompt
+
+All data from the pre-processing pipeline (intent, sentiment, style, security score, selected model, optimized prompt, parameters)
+
+The final AI-generated response
+
+All data from the post-processing pipeline (validation status, security score)
