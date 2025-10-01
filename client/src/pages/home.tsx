@@ -183,43 +183,52 @@ export default function Home() {
     <div className="h-screen flex flex-col bg-background">
       <Header />
       
-      <div className="flex-1 overflow-hidden">
-        <div className="h-full grid grid-cols-1 lg:grid-cols-5 gap-6 p-6">
-          {/* Chat Area */}
-          <div className="lg:col-span-3 flex flex-col min-h-0">
-            <ScrollArea className="flex-1 pr-4">
-              <div className="space-y-4 pb-4">
-                {messages.length === 0 ? (
-                  <div className="flex items-center justify-center h-64">
-                    <div className="text-center">
-                      <p className="text-muted-foreground mb-2">
-                        Welcome to AI Middleware & Analysis Tool
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        Send a message to see real-time analysis and processing
-                      </p>
+      <div className="flex-1 overflow-hidden p-6">
+        <div className="h-full flex flex-col gap-4">
+          {/* Top Section: Chat + Dashboard */}
+          <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5 gap-6">
+            {/* Chat Area */}
+            <div className="lg:col-span-3 flex flex-col min-h-0 h-full">
+              <ScrollArea className="flex-1 pr-4">
+                <div className="space-y-4 pb-4">
+                  {messages.length === 0 ? (
+                    <div className="flex items-center justify-center h-64">
+                      <div className="text-center">
+                        <p className="text-muted-foreground mb-2">
+                          Welcome to AI Middleware & Analysis Tool
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Send a message to see real-time analysis and processing
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  messages.map(msg => (
-                    <ChatMessage
-                      key={msg.id}
-                      role={msg.role}
-                      content={msg.content}
-                      timestamp={msg.timestamp}
-                    />
-                  ))
-                )}
+                  ) : (
+                    messages.map(msg => (
+                      <ChatMessage
+                        key={msg.id}
+                        role={msg.role}
+                        content={msg.content}
+                        timestamp={msg.timestamp}
+                      />
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+              <div className="mt-4">
+                <ChatInput onSendMessage={handleSendMessage} disabled={isProcessing} />
               </div>
-            </ScrollArea>
-            <div className="mt-4">
-              <ChatInput onSendMessage={handleSendMessage} disabled={isProcessing} />
+            </div>
+
+            {/* Dashboard Area */}
+            <div className="lg:col-span-2 min-h-0 h-full">
+              <ScrollArea className="h-full pr-4">
+                <AnalysisDashboard data={analysisData} />
+              </ScrollArea>
             </div>
           </div>
 
-          {/* Dashboard Area */}
-          <div className="lg:col-span-2 flex flex-col gap-4 min-h-0">
-            <AnalysisDashboard data={analysisData} />
+          {/* Bottom Section: Process Log - Fixed Height */}
+          <div className="h-48 min-h-0">
             <ProcessLog logs={logs} />
           </div>
         </div>
