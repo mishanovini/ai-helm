@@ -6,7 +6,7 @@ export default function AnalysisDashboardExample() {
     sentiment: "neutral" as const,
     style: "Educational, simplified",
     securityScore: 1,
-    selectedModel: "Gemini 1.5 Pro",
+    selectedModel: "Gemini 2.5 Pro",
     modelProvider: "Gemini" as const,
     optimizedPrompt: "Explain quantum entanglement in simple, accessible terms suitable for a general audience. Use analogies and avoid technical jargon. Focus on clarity and comprehension.",
     parameters: {

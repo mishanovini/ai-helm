@@ -70,8 +70,8 @@ export default function Home() {
 
     // Step 4: Model selection
     const models = useDeepResearch 
-      ? ["Gemini 2.0 Flash Thinking", "Gemini 1.5 Pro (Deep Research)"]
-      : ["Gemini 2.0 Flash", "Gemini 1.5 Pro", "Gemini 1.5 Flash", "Gemini 1.0 Pro (Imagen)"];
+      ? ["Gemini 2.5 Pro Deep Think", "Gemini 2.5 Pro"]
+      : ["Gemini 2.5 Flash", "Gemini 2.5 Flash-Lite", "Gemini 2.5 Pro", "Gemini 2.0 Flash"];
     
     const selectedModel = models[Math.floor(Math.random() * models.length)];
     const modelProvider = "Gemini" as const;
