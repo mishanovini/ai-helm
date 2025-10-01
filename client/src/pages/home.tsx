@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Header from "@/components/Header";
 import ChatMessage from "@/components/ChatMessage";
 import ChatInput from "@/components/ChatInput";
@@ -6,6 +6,7 @@ import AnalysisDashboard, { type AnalysisData } from "@/components/AnalysisDashb
 import ProcessLog, { type LogEntry } from "@/components/ProcessLog";
 import DeepResearchModal from "@/components/DeepResearchModal";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useWebSocket } from "@/hooks/use-websocket";
 
 interface Message {
   id: string;
@@ -37,83 +38,62 @@ export default function Home() {
     }]);
   };
 
-  const simulateAnalysis = async (userMessage: string, useDeepResearch: boolean = false) => {
-    setIsProcessing(true);
-    
-    try {
-      // Step 1: Call Gemini analysis API
-      addLog("Analyzing user prompt with Gemini 2.5 Flash-Lite...", "info");
-      
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: userMessage,
-          useDeepResearch
-        })
-      });
+  const handleWebSocketMessage = useCallback((update: any) => {
+    const { phase, status, payload, error } = update;
 
-      if (!response.ok) {
-        throw new Error("Analysis failed");
+    // Handle different phases of analysis
+    if (phase === "started") {
+      addLog("Starting real-time analysis with Gemini 2.5 Flash-Lite...", "info");
+      // Reset analysis data for new analysis
+      setAnalysisData({} as AnalysisData);
+    } else if (phase === "intent" && status === "completed") {
+      // Remove processing log and add success
+      setLogs(prev => prev.filter(log => log.message !== "Detecting intent..."));
+      addLog(`Intent detected: ${payload.intent}`, "success");
+      setAnalysisData(prev => ({ ...prev, intent: payload.intent } as AnalysisData));
+    } else if (phase === "sentiment" && status === "completed") {
+      setLogs(prev => prev.filter(log => log.message !== "Analyzing sentiment..."));
+      addLog(`Sentiment: ${payload.sentiment}`, "success");
+      setAnalysisData(prev => ({ 
+        ...prev, 
+        sentiment: payload.sentiment,
+        sentimentDetail: payload.sentimentDetail 
+      } as AnalysisData));
+    } else if (phase === "style" && status === "completed") {
+      setLogs(prev => prev.filter(log => log.message !== "Analyzing style..."));
+      addLog(`Style: ${payload.style}`, "success");
+      setAnalysisData(prev => ({ ...prev, style: payload.style } as AnalysisData));
+    } else if (phase === "security" && status === "completed") {
+      setLogs(prev => prev.filter(log => log.message !== "Assessing security risk..."));
+      addLog(`Security score: ${payload.securityScore}/10`, "success");
+      if (payload.securityExplanation) {
+        addLog(`Risk: ${payload.securityExplanation}`, "info");
       }
-
-      const analysisResult = await response.json();
+      setAnalysisData(prev => ({ 
+        ...prev, 
+        securityScore: payload.securityScore,
+        securityExplanation: payload.securityExplanation 
+      } as AnalysisData));
+    } else if (phase === "model" && status === "completed") {
+      setLogs(prev => prev.filter(log => log.message !== "Selecting optimal model..."));
+      addLog(`Model selected: ${payload.selectedModel}`, "success");
+      setAnalysisData(prev => ({ 
+        ...prev, 
+        selectedModel: payload.selectedModel,
+        modelProvider: payload.modelProvider 
+      } as AnalysisData));
+    } else if (phase === "prompt" && status === "completed") {
+      setLogs(prev => prev.filter(log => log.message !== "Optimizing prompt..."));
+      addLog("Prompt optimized", "success");
+      setAnalysisData(prev => ({ ...prev, optimizedPrompt: payload.optimizedPrompt } as AnalysisData));
+    } else if (phase === "parameters" && status === "completed") {
+      setLogs(prev => prev.filter(log => log.message !== "Tuning parameters..."));
+      addLog("Parameters configured", "success");
+      setAnalysisData(prev => ({ ...prev, parameters: payload.parameters } as AnalysisData));
+    } else if (phase === "complete" && status === "completed") {
+      addLog("Analysis complete!", "success");
       
-      // Step 2: Display results progressively
-      await new Promise(resolve => setTimeout(resolve, 300));
-      addLog(`Intent detected: ${analysisResult.intent}`, "success");
-      
-      await new Promise(resolve => setTimeout(resolve, 200));
-      addLog(`Sentiment detected: ${analysisResult.sentiment}`, "success");
-      
-      await new Promise(resolve => setTimeout(resolve, 200));
-      addLog(`Security risk assessed: ${analysisResult.securityScore}/10`, "success");
-      if (analysisResult.securityExplanation) {
-        addLog(`Risk details: ${analysisResult.securityExplanation}`, "info");
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 200));
-      addLog(`Model selected: ${analysisResult.selectedModel}`, "info");
-      
-      await new Promise(resolve => setTimeout(resolve, 300));
-      addLog("Optimizing prompt...", "info");
-      await new Promise(resolve => setTimeout(resolve, 400));
-      addLog("Prompt optimized successfully", "success");
-
-      // Update analysis dashboard
-      setAnalysisData({
-        intent: analysisResult.intent,
-        sentiment: analysisResult.sentiment,
-        sentimentDetail: analysisResult.sentimentDetail,
-        style: analysisResult.style,
-        securityScore: analysisResult.securityScore,
-        securityExplanation: analysisResult.securityExplanation,
-        selectedModel: analysisResult.selectedModel,
-        modelProvider: analysisResult.modelProvider,
-        optimizedPrompt: analysisResult.optimizedPrompt,
-        parameters: analysisResult.parameters
-      });
-
-      // Step 7: Send to model
-      addLog("Sending request to model...", "processing");
-      await new Promise(resolve => setTimeout(resolve, useDeepResearch ? 2000 : 1000));
-      addLog("Response received from model", "success");
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      // Step 8: Validate response
-      addLog("Validating response...", "info");
-      await new Promise(resolve => setTimeout(resolve, 400));
-      addLog("Validation passed", "success");
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      // Step 9: Security check on response
-      addLog("Running security analysis on response...", "info");
-      await new Promise(resolve => setTimeout(resolve, 300));
-      addLog("Response security check: 0/10 - Safe", "success");
-
-      // Add assistant message
+      // Simulate final response
       const responses = [
         "Based on my analysis, I can provide you with a comprehensive response tailored to your needs.",
         "I've processed your request and optimized my response to match your preferred style and intent.",
@@ -133,12 +113,35 @@ export default function Home() {
         content: responses[Math.floor(Math.random() * responses.length)],
         timestamp
       }]);
-
-      addLog("Displaying final response", "success");
+      
       setIsProcessing(false);
-    } catch (error) {
-      console.error("Analysis error:", error);
-      addLog("Analysis failed. Please check your Gemini API key.", "error");
+    } else if (status === "error") {
+      addLog(`Error in ${phase}: ${error || "Unknown error"}`, "error");
+      setIsProcessing(false);
+    }
+  }, []);
+
+  const { isConnected, sendMessage } = useWebSocket(handleWebSocketMessage);
+
+  const simulateAnalysis = async (userMessage: string, useDeepResearch: boolean = false) => {
+    setIsProcessing(true);
+    
+    if (!isConnected) {
+      addLog("WebSocket not connected. Retrying...", "error");
+      setIsProcessing(false);
+      return;
+    }
+
+    const sent = sendMessage({
+      type: "analyze",
+      payload: {
+        message: userMessage,
+        useDeepResearch
+      }
+    });
+
+    if (!sent) {
+      addLog("Failed to send analysis request", "error");
       setIsProcessing(false);
     }
   };

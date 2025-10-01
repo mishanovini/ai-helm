@@ -55,7 +55,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
         </h2>
       </div>
 
-      {!data ? (
+      {!data || Object.keys(data).length === 0 ? (
         <Card className="p-6">
           <p className="text-sm text-muted-foreground text-center">
             Send a message to see real-time analysis
@@ -70,14 +70,18 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
                   Intent
                 </label>
-                <p className="text-sm font-medium mt-1" data-testid="text-intent">{data.intent}</p>
+                <p className="text-sm font-medium mt-1" data-testid="text-intent">
+                  {data.intent || <span className="text-muted-foreground animate-pulse">Analyzing...</span>}
+                </p>
               </div>
 
               <div>
                 <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
                   Style
                 </label>
-                <p className="text-sm font-medium mt-1" data-testid="text-style">{data.style}</p>
+                <p className="text-sm font-medium mt-1" data-testid="text-style">
+                  {data.style || <span className="text-muted-foreground animate-pulse">Analyzing...</span>}
+                </p>
               </div>
             </div>
 
@@ -87,10 +91,14 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 Selected Model
               </label>
               <div className="mt-2">
-                <Badge className="bg-chart-4/20 text-chart-4" data-testid="badge-model">
-                  {getProviderIcon(data.modelProvider)}
-                  <span className="ml-1">{data.selectedModel}</span>
-                </Badge>
+                {data.selectedModel ? (
+                  <Badge className="bg-chart-4/20 text-chart-4" data-testid="badge-model">
+                    {getProviderIcon(data.modelProvider || "Gemini")}
+                    <span className="ml-1">{data.selectedModel}</span>
+                  </Badge>
+                ) : (
+                  <span className="text-sm text-muted-foreground animate-pulse">Selecting...</span>
+                )}
               </div>
             </div>
           </Card>
@@ -103,13 +111,19 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                   Sentiment
                 </label>
                 <div className="mt-1">
-                  <Badge className={getSentimentColor(data.sentiment)} data-testid="badge-sentiment">
-                    {data.sentiment}
-                  </Badge>
-                  {data.sentimentDetail && (
-                    <p className="text-xs text-muted-foreground mt-2" data-testid="text-sentiment-detail">
-                      {data.sentimentDetail}
-                    </p>
+                  {data.sentiment ? (
+                    <>
+                      <Badge className={getSentimentColor(data.sentiment)} data-testid="badge-sentiment">
+                        {data.sentiment}
+                      </Badge>
+                      {data.sentimentDetail && (
+                        <p className="text-xs text-muted-foreground mt-2" data-testid="text-sentiment-detail">
+                          {data.sentimentDetail}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-sm text-muted-foreground animate-pulse">Analyzing...</span>
                   )}
                 </div>
               </div>
@@ -120,21 +134,27 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                   Security
                 </label>
                 <div className="mt-1 space-y-2">
-                  <div className="flex items-baseline gap-2">
-                    <span className={`text-xl font-bold ${getSecurityColor(data.securityScore)}`} data-testid="text-security-score">
-                      {data.securityScore}
-                    </span>
-                    <span className="text-xs text-muted-foreground">/ 10</span>
-                  </div>
-                  <div className={`w-full h-1.5 bg-secondary rounded-full overflow-hidden`}>
-                    <div 
-                      className={`h-full transition-all ${getSecurityBgColor(data.securityScore)}`}
-                      style={{ width: `${data.securityScore * 10}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {data.securityScore <= 3 ? "Low risk" : data.securityScore <= 6 ? "Medium risk" : "High risk"}
-                  </p>
+                  {data.securityScore !== undefined ? (
+                    <>
+                      <div className="flex items-baseline gap-2">
+                        <span className={`text-xl font-bold ${getSecurityColor(data.securityScore)}`} data-testid="text-security-score">
+                          {data.securityScore}
+                        </span>
+                        <span className="text-xs text-muted-foreground">/ 10</span>
+                      </div>
+                      <div className={`w-full h-1.5 bg-secondary rounded-full overflow-hidden`}>
+                        <div 
+                          className={`h-full transition-all ${getSecurityBgColor(data.securityScore)}`}
+                          style={{ width: `${data.securityScore * 10}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {data.securityScore <= 3 ? "Low risk" : data.securityScore <= 6 ? "Medium risk" : "High risk"}
+                      </p>
+                    </>
+                  ) : (
+                    <span className="text-sm text-muted-foreground animate-pulse">Assessing...</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -154,14 +174,18 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
               <Settings className="h-3 w-3" />
               Parameters
             </label>
-            <div className="grid grid-cols-3 gap-2">
-              {Object.entries(data.parameters).map(([key, value]) => (
-                <div key={key} className="text-xs">
-                  <span className="text-muted-foreground">{key}:</span>{" "}
-                  <span className="font-medium" data-testid={`text-param-${key}`}>{value}</span>
-                </div>
-              ))}
-            </div>
+            {data.parameters ? (
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(data.parameters).map(([key, value]) => (
+                  <div key={key} className="text-xs">
+                    <span className="text-muted-foreground">{key}:</span>{" "}
+                    <span className="font-medium" data-testid={`text-param-${key}`}>{value}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <span className="text-sm text-muted-foreground animate-pulse">Tuning...</span>
+            )}
           </Card>
 
           {/* Optimized Prompt - Compact ScrollArea */}
@@ -170,11 +194,15 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
               <Code className="h-3 w-3" />
               Optimized Prompt
             </label>
-            <ScrollArea className="h-24">
-              <pre className="text-xs font-mono bg-muted/50 p-2 rounded border" data-testid="text-optimized-prompt">
-                {data.optimizedPrompt}
-              </pre>
-            </ScrollArea>
+            {data.optimizedPrompt ? (
+              <ScrollArea className="h-24">
+                <pre className="text-xs font-mono bg-muted/50 p-2 rounded border" data-testid="text-optimized-prompt">
+                  {data.optimizedPrompt}
+                </pre>
+              </ScrollArea>
+            ) : (
+              <span className="text-sm text-muted-foreground animate-pulse">Optimizing...</span>
+            )}
           </Card>
         </>
       )}
