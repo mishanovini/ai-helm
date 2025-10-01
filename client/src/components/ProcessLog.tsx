@@ -12,9 +12,10 @@ export interface LogEntry {
 
 interface ProcessLogProps {
   logs: LogEntry[];
+  isProcessing?: boolean;
 }
 
-export default function ProcessLog({ logs }: ProcessLogProps) {
+export default function ProcessLog({ logs, isProcessing = false }: ProcessLogProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,7 +58,19 @@ export default function ProcessLog({ logs }: ProcessLogProps) {
 
   return (
     <Card className="p-4 h-full flex flex-col">
-      <h3 className="text-sm font-semibold mb-3">Process Log</h3>
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-sm font-semibold">Process Log</h3>
+        {isProcessing && (
+          <div className="flex items-center gap-1">
+            <div className="flex gap-1">
+              <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+            <span className="text-xs text-muted-foreground">Processing...</span>
+          </div>
+        )}
+      </div>
       <div className="flex-1 min-h-0">
         <ScrollArea className="h-full pr-4" ref={scrollAreaRef}>
           <div className="space-y-1">

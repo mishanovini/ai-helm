@@ -197,15 +197,20 @@ export async function runAnalysisJob(
 
     // Phase 3: Generate actual AI response using selected model
     if (!hasError) {
-      sendUpdate("response", "processing");
+      // Send a log entry to indicate we're prompting the model
+      sendUpdate("generating", "processing");
       try {
         const aiResponse = await generateResponse(
           results.optimizedPrompt,
           results.selectedModel,
           results.parameters
         );
+        sendUpdate("generating", "completed", { 
+          message: `Response generated using ${results.selectedModel}` 
+        });
         sendUpdate("response", "completed", { response: aiResponse });
       } catch (error: any) {
+        sendUpdate("generating", "error", undefined, error.message);
         sendUpdate("response", "error", undefined, error.message);
         hasError = true;
       }

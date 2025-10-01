@@ -7,6 +7,7 @@ import ProcessLog, { type LogEntry } from "@/components/ProcessLog";
 import DeepResearchModal from "@/components/DeepResearchModal";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWebSocket } from "@/hooks/use-websocket";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 
 interface Message {
   id: string;
@@ -90,8 +91,12 @@ export default function Home() {
       setLogs(prev => prev.filter(log => log.message !== "Tuning parameters..."));
       addLog("Parameters configured", "success");
       setAnalysisData(prev => ({ ...prev, parameters: payload.parameters } as AnalysisData));
+    } else if (phase === "generating" && status === "processing") {
+      addLog("Prompting AI model...", "processing");
+    } else if (phase === "generating" && status === "completed") {
+      setLogs(prev => prev.filter(log => !(log.type === "processing" && log.message === "Prompting AI model...")));
+      addLog(payload.message || "Response generated successfully", "success");
     } else if (phase === "response" && status === "completed") {
-      addLog("Response generated", "success");
       
       const timestamp = new Date().toLocaleTimeString('en-US', { 
         hour: 'numeric',
@@ -184,54 +189,62 @@ export default function Home() {
       <Header />
       
       <div className="flex-1 overflow-hidden p-6">
-        <div className="h-full flex flex-col gap-4">
+        <ResizablePanelGroup direction="vertical" className="h-full">
           {/* Top Section: Chat + Dashboard */}
-          <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5 gap-6">
-            {/* Chat Area */}
-            <div className="lg:col-span-3 flex flex-col min-h-0 h-full">
-              <ScrollArea className="flex-1 pr-4">
-                <div className="space-y-4 pb-4">
-                  {messages.length === 0 ? (
-                    <div className="flex items-center justify-center h-64">
-                      <div className="text-center">
-                        <p className="text-muted-foreground mb-2">
-                          Welcome to AI Middleware & Analysis Tool
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Send a message to see real-time analysis and processing
-                        </p>
-                      </div>
+          <ResizablePanel defaultSize={50} minSize={30}>
+            <ResizablePanelGroup direction="horizontal" className="h-full gap-6">
+              {/* Chat Area */}
+              <ResizablePanel defaultSize={60} minSize={40}>
+                <div className="flex flex-col h-full">
+                  <ScrollArea className="flex-1 pr-4">
+                    <div className="space-y-4 pb-4">
+                      {messages.length === 0 ? (
+                        <div className="flex items-center justify-center h-64">
+                          <div className="text-center">
+                            <p className="text-muted-foreground mb-2">
+                              Welcome to AI Middleware & Analysis Tool
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              Send a message to see real-time analysis and processing
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        messages.map(msg => (
+                          <ChatMessage
+                            key={msg.id}
+                            role={msg.role}
+                            content={msg.content}
+                            timestamp={msg.timestamp}
+                          />
+                        ))
+                      )}
                     </div>
-                  ) : (
-                    messages.map(msg => (
-                      <ChatMessage
-                        key={msg.id}
-                        role={msg.role}
-                        content={msg.content}
-                        timestamp={msg.timestamp}
-                      />
-                    ))
-                  )}
+                  </ScrollArea>
+                  <div className="mt-4">
+                    <ChatInput onSendMessage={handleSendMessage} disabled={isProcessing} />
+                  </div>
                 </div>
-              </ScrollArea>
-              <div className="mt-4">
-                <ChatInput onSendMessage={handleSendMessage} disabled={isProcessing} />
-              </div>
-            </div>
+              </ResizablePanel>
 
-            {/* Dashboard Area */}
-            <div className="lg:col-span-2 min-h-0 h-full">
-              <ScrollArea className="h-full pr-4">
-                <AnalysisDashboard data={analysisData} />
-              </ScrollArea>
-            </div>
-          </div>
+              <ResizableHandle withHandle />
 
-          {/* Bottom Section: Process Log - Fixed Height */}
-          <div className="h-48 min-h-0">
-            <ProcessLog logs={logs} />
-          </div>
-        </div>
+              {/* Dashboard Area */}
+              <ResizablePanel defaultSize={40} minSize={30}>
+                <ScrollArea className="h-full pr-4">
+                  <AnalysisDashboard data={analysisData} />
+                </ScrollArea>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
+
+          {/* Bottom Section: Process Log */}
+          <ResizablePanel defaultSize={50} minSize={20}>
+            <ProcessLog logs={logs} isProcessing={isProcessing} />
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
 
       <DeepResearchModal

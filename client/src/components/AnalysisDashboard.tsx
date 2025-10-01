@@ -63,7 +63,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
         </Card>
       ) : (
         <>
-          {/* Intent, Style, and Model - Compact Grid */}
+          {/* Intent and Style - Compact Grid */}
           <Card className="p-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -84,22 +84,44 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 </p>
               </div>
             </div>
+          </Card>
 
-            <div className="mt-4 pt-4 border-t">
-              <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium flex items-center gap-1">
-                <Sparkles className="h-3 w-3" />
-                Selected Model
-              </label>
-              <div className="mt-2">
-                {data.selectedModel ? (
-                  <Badge className="bg-chart-4/20 text-chart-4" data-testid="badge-model">
-                    {getProviderIcon(data.modelProvider || "Gemini")}
-                    <span className="ml-1">{data.selectedModel}</span>
-                  </Badge>
-                ) : (
-                  <span className="text-sm text-muted-foreground animate-pulse">Selecting...</span>
-                )}
+          {/* Selected Model and Parameters - Combined */}
+          <Card className="p-4">
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />
+                  Selected Model
+                </label>
+                <div className="mt-1.5">
+                  {data.selectedModel ? (
+                    <Badge className="bg-chart-4/20 text-chart-4" data-testid="badge-model">
+                      {getProviderIcon(data.modelProvider || "Gemini")}
+                      <span className="ml-1">{data.selectedModel}</span>
+                    </Badge>
+                  ) : (
+                    <span className="text-sm text-muted-foreground animate-pulse">Selecting...</span>
+                  )}
+                </div>
               </div>
+
+              {data.parameters && (
+                <div className="pt-3 border-t">
+                  <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium flex items-center gap-1 mb-2">
+                    <Settings className="h-3 w-3" />
+                    Parameters
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {Object.entries(data.parameters).map(([key, value]) => (
+                      <div key={key} className="text-xs">
+                        <span className="text-muted-foreground">{key}:</span>{" "}
+                        <span className="font-medium" data-testid={`text-param-${key}`}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
 
@@ -162,29 +184,9 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
             {data.securityExplanation && (
               <div className="mt-3 pt-3 border-t">
                 <p className="text-xs text-muted-foreground" data-testid="text-security-explanation">
-                  <span className="font-medium">Risk: </span>{data.securityExplanation}
+                  {data.securityExplanation}
                 </p>
               </div>
-            )}
-          </Card>
-
-          {/* Parameters - More Compact */}
-          <Card className="p-4">
-            <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium flex items-center gap-1 mb-2">
-              <Settings className="h-3 w-3" />
-              Parameters
-            </label>
-            {data.parameters ? (
-              <div className="grid grid-cols-3 gap-2">
-                {Object.entries(data.parameters).map(([key, value]) => (
-                  <div key={key} className="text-xs">
-                    <span className="text-muted-foreground">{key}:</span>{" "}
-                    <span className="font-medium" data-testid={`text-param-${key}`}>{value}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <span className="text-sm text-muted-foreground animate-pulse">Tuning...</span>
             )}
           </Card>
 
