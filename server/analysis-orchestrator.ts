@@ -6,7 +6,8 @@ import {
   analyzeSecurityRisk,
   selectModel,
   optimizePrompt,
-  tuneParameters
+  tuneParameters,
+  generateResponse
 } from "./gemini-analysis";
 
 export interface AnalysisJob {
@@ -174,22 +175,40 @@ export async function runAnalysisJob(
 
     // Phase 2: Parameter tuning (depends on model and optimized prompt)
     sendUpdate("parameters", "processing");
+    let parametersResult: any;
     try {
       const [model, optimizedPrompt] = await Promise.all([
         promises.model,
         promises.prompt
       ]);
       
-      const parametersResult = await tuneParameters(
+      parametersResult = await tuneParameters(
         results.intent,
         results.sentiment,
         model,
         optimizedPrompt
       );
+      results.parameters = parametersResult;
       sendUpdate("parameters", "completed", { parameters: parametersResult });
     } catch (error: any) {
       sendUpdate("parameters", "error", undefined, error.message);
       hasError = true;
+    }
+
+    // Phase 3: Generate actual AI response using selected model
+    if (!hasError) {
+      sendUpdate("response", "processing");
+      try {
+        const aiResponse = await generateResponse(
+          results.optimizedPrompt,
+          results.selectedModel,
+          results.parameters
+        );
+        sendUpdate("response", "completed", { response: aiResponse });
+      } catch (error: any) {
+        sendUpdate("response", "error", undefined, error.message);
+        hasError = true;
+      }
     }
 
     // Send completion signal

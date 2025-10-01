@@ -155,17 +155,18 @@ export async function selectModel(
   messageLength: number,
   deepResearch: boolean
 ): Promise<ModelSelection> {
-  const prompt = `Based on this analysis, select the best Gemini model:
+  const prompt = `Based on this analysis, select the best Gemini model for responding to the user:
 
 Intent: ${intent}
 Message length: ${messageLength} characters
 Deep research mode: ${deepResearch}
 
-Available models:
+Available models (Flash-Lite is NOT available for responses):
 - Gemini 2.5 Pro Deep Think (best for: complex analysis, long documents, deep reasoning)
 - Gemini 2.5 Pro (best for: code generation, creative writing, complex tasks)
 - Gemini 2.5 Flash (best for: explanations, questions, balanced tasks)
-- Gemini 2.5 Flash-Lite (best for: simple queries, quick responses)
+
+NOTE: Do NOT select Flash-Lite. Choose one of the three models above.
 
 Respond with ONLY the exact model name, nothing else.`;
 
@@ -174,8 +175,14 @@ Respond with ONLY the exact model name, nothing else.`;
     contents: prompt,
   });
 
+  let selectedModel = response.text?.trim() || "Gemini 2.5 Flash";
+  
+  if (selectedModel.includes("Flash-Lite") || selectedModel.includes("Flash Lite")) {
+    selectedModel = "Gemini 2.5 Flash";
+  }
+
   return {
-    model: response.text?.trim() || "Gemini 2.5 Flash"
+    model: selectedModel
   };
 }
 
@@ -261,4 +268,35 @@ Respond with ONLY valid JSON, no other text.`;
       max_tokens: 1000
     };
   }
+}
+
+function mapModelToGeminiModel(selectedModel: string): string {
+  const modelMap: Record<string, string> = {
+    "Gemini 2.5 Pro Deep Think": "gemini-2.5-pro",
+    "Gemini 2.5 Pro": "gemini-2.5-pro",
+    "Gemini 2.5 Flash": "gemini-2.5-flash",
+    "Gemini 2.5 Flash-Lite": "gemini-2.5-flash"
+  };
+  
+  return modelMap[selectedModel] || "gemini-2.5-flash";
+}
+
+export async function generateResponse(
+  optimizedPrompt: string,
+  selectedModel: string,
+  parameters: ParameterTuning
+): Promise<string> {
+  const geminiModel = mapModelToGeminiModel(selectedModel);
+  
+  const response = await ai.models.generateContent({
+    model: geminiModel,
+    contents: optimizedPrompt,
+    config: {
+      temperature: parameters.temperature,
+      topP: parameters.top_p,
+      maxOutputTokens: parameters.max_tokens
+    }
+  });
+
+  return response.text || "I apologize, but I couldn't generate a response at this time.";
 }

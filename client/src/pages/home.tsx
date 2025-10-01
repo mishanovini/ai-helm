@@ -90,16 +90,8 @@ export default function Home() {
       setLogs(prev => prev.filter(log => log.message !== "Tuning parameters..."));
       addLog("Parameters configured", "success");
       setAnalysisData(prev => ({ ...prev, parameters: payload.parameters } as AnalysisData));
-    } else if (phase === "complete" && status === "completed") {
-      addLog("Analysis complete!", "success");
-      
-      // Simulate final response
-      const responses = [
-        "Based on my analysis, I can provide you with a comprehensive response tailored to your needs.",
-        "I've processed your request and optimized my response to match your preferred style and intent.",
-        "Here's a detailed answer that addresses your question with the appropriate level of technical depth.",
-        "After analyzing your prompt, I've generated a response that aligns with the detected sentiment and style preferences."
-      ];
+    } else if (phase === "response" && status === "completed") {
+      addLog("Response generated", "success");
       
       const timestamp = new Date().toLocaleTimeString('en-US', { 
         hour: 'numeric',
@@ -110,10 +102,11 @@ export default function Home() {
       setMessages(prev => [...prev, {
         id: `assistant-${Date.now()}`,
         role: "assistant",
-        content: responses[Math.floor(Math.random() * responses.length)],
+        content: payload.response,
         timestamp
       }]);
-      
+    } else if (phase === "complete" && status === "completed") {
+      addLog("Analysis complete!", "success");
       setIsProcessing(false);
     } else if (status === "error") {
       addLog(`Error in ${phase}: ${error || "Unknown error"}`, "error");
