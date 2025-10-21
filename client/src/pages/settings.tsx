@@ -20,6 +20,7 @@ export default function Settings() {
     openai: false,
     anthropic: false,
   });
+  const [isValidating, setIsValidating] = useState(false);
 
   useEffect(() => {
     // Load API keys from localStorage
@@ -29,7 +30,7 @@ export default function Settings() {
     }
   }, []);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // Validate at least one key is provided
     if (!hasAnyAPIKey(keys)) {
       toast({
@@ -40,13 +41,79 @@ export default function Settings() {
       return;
     }
 
-    // Save to localStorage
-    saveAPIKeys(keys);
-    
-    toast({
-      title: "API Keys Saved",
-      description: "Your API keys have been saved securely in your browser.",
-    });
+    setIsValidating(true);
+
+    try {
+      // Validate API keys with the backend
+      const response = await fetch('/api/validate-keys', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(keys),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        toast({
+          title: "Validation Failed",
+          description: data.error || "Failed to validate API keys. Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Check validation results
+      const { valid, results } = data;
+
+      if (!valid) {
+        // Build error message based on validation results
+        let errorMessage = '';
+        
+        if (results.gemini && !results.gemini.valid) {
+          errorMessage = `Gemini: ${results.gemini.error || 'Invalid key'}`;
+        }
+        
+        if (results.openai && keys.openai && !results.openai.valid) {
+          errorMessage += (errorMessage ? '\n' : '') + `OpenAI: ${results.openai.error || 'Invalid key'}`;
+        }
+        
+        if (results.anthropic && keys.anthropic && !results.anthropic.valid) {
+          errorMessage += (errorMessage ? '\n' : '') + `Anthropic: ${results.anthropic.error || 'Invalid key'}`;
+        }
+
+        toast({
+          title: "Invalid API Keys",
+          description: errorMessage || "One or more API keys are invalid.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // All validations passed - save to localStorage
+      saveAPIKeys(keys);
+      
+      // Build success message
+      const validKeys = [];
+      if (results.gemini?.valid) validKeys.push('Gemini');
+      if (results.openai?.valid) validKeys.push('OpenAI');
+      if (results.anthropic?.valid) validKeys.push('Anthropic');
+
+      toast({
+        title: "API Keys Validated & Saved",
+        description: `Successfully validated and saved: ${validKeys.join(', ')}`,
+      });
+    } catch (error: any) {
+      console.error('API key validation error:', error);
+      toast({
+        title: "Validation Error",
+        description: "Failed to validate API keys. Please check your connection and try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsValidating(false);
+    }
   };
 
   const handleClear = () => {
@@ -212,10 +279,19 @@ export default function Settings() {
               </div>
 
               <div className="flex gap-3">
-                <Button onClick={handleSave} data-testid="button-save-keys">
-                  Save API Keys
+                <Button 
+                  onClick={handleSave} 
+                  disabled={isValidating}
+                  data-testid="button-save-keys"
+                >
+                  {isValidating ? "Validating..." : "Save API Keys"}
                 </Button>
-                <Button variant="outline" onClick={handleClear} data-testid="button-clear-keys">
+                <Button 
+                  variant="outline" 
+                  onClick={handleClear} 
+                  disabled={isValidating}
+                  data-testid="button-clear-keys"
+                >
                   Clear All Keys
                 </Button>
               </div>

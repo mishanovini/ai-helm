@@ -4,8 +4,57 @@ import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "crypto";
 import { storage } from "./storage";
 import { runAnalysisJob } from "./analysis-orchestrator";
+import { validateAPIKey } from "./api-key-validator";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  
+  // API key validation endpoint
+  app.post("/api/validate-keys", async (req, res) => {
+    try {
+      const { gemini, openai, anthropic } = req.body;
+      
+      const results: any = {
+        gemini: { valid: false, error: null },
+        openai: { valid: false, error: null },
+        anthropic: { valid: false, error: null }
+      };
+
+      // Validate Gemini key (required)
+      if (gemini) {
+        const geminiResult = await validateAPIKey('gemini', gemini);
+        results.gemini = geminiResult;
+      } else {
+        results.gemini = { valid: false, error: 'Gemini API key is required' };
+      }
+
+      // Validate OpenAI key (optional)
+      if (openai) {
+        const openaiResult = await validateAPIKey('openai', openai);
+        results.openai = openaiResult;
+      }
+
+      // Validate Anthropic key (optional)
+      if (anthropic) {
+        const anthropicResult = await validateAPIKey('anthropic', anthropic);
+        results.anthropic = anthropicResult;
+      }
+
+      // Check if at least Gemini is valid
+      const isValid = results.gemini.valid;
+
+      res.status(200).json({
+        valid: isValid,
+        results
+      });
+    } catch (error: any) {
+      console.error("API key validation error:", error);
+      res.status(500).json({ 
+        valid: false,
+        error: "Failed to validate API keys",
+        details: error.message
+      });
+    }
+  });
   
   // Keep legacy REST endpoint for backwards compatibility
   app.post("/api/analyze", async (req, res) => {
