@@ -10,10 +10,17 @@ import {
   generateResponse
 } from "./gemini-analysis";
 
+export interface APIKeys {
+  gemini: string;
+  openai?: string;
+  anthropic?: string;
+}
+
 export interface AnalysisJob {
   jobId: string;
   message: string;
   useDeepResearch: boolean;
+  apiKeys: APIKeys;
 }
 
 export interface AnalysisUpdate {
@@ -28,7 +35,7 @@ export async function runAnalysisJob(
   job: AnalysisJob,
   ws: WebSocket
 ): Promise<void> {
-  const { jobId, message, useDeepResearch } = job;
+  const { jobId, message, useDeepResearch, apiKeys } = job;
 
   // Store results and promises for dependent analyses
   const results: any = {};
@@ -49,7 +56,7 @@ export async function runAnalysisJob(
     promises.intent = (async () => {
       sendUpdate("intent", "processing");
       try {
-        const result = await analyzeIntent(message);
+        const result = await analyzeIntent(message, apiKeys.gemini);
         results.intent = result.intent;
         sendUpdate("intent", "completed", { intent: result.intent });
         return result.intent;
@@ -64,7 +71,7 @@ export async function runAnalysisJob(
     promises.sentiment = (async () => {
       sendUpdate("sentiment", "processing");
       try {
-        const result = await analyzeSentiment(message);
+        const result = await analyzeSentiment(message, apiKeys.gemini);
         results.sentiment = result.sentiment;
         results.sentimentDetail = result.detail;
         sendUpdate("sentiment", "completed", { 
@@ -83,7 +90,7 @@ export async function runAnalysisJob(
     promises.style = (async () => {
       sendUpdate("style", "processing");
       try {
-        const result = await analyzeStyle(message);
+        const result = await analyzeStyle(message, apiKeys.gemini);
         results.style = result.style;
         sendUpdate("style", "completed", { style: result.style });
         return result.style;
@@ -98,7 +105,7 @@ export async function runAnalysisJob(
     promises.security = (async () => {
       sendUpdate("security", "processing");
       try {
-        const result = await analyzeSecurityRisk(message);
+        const result = await analyzeSecurityRisk(message, apiKeys.gemini);
         results.securityScore = result.score;
         results.securityExplanation = result.explanation;
         sendUpdate("security", "completed", { 
@@ -118,7 +125,7 @@ export async function runAnalysisJob(
       sendUpdate("model", "processing");
       try {
         const intent = await promises.intent;
-        const result = await selectModel(intent, message.length, useDeepResearch);
+        const result = await selectModel(intent, message.length, useDeepResearch, apiKeys.gemini);
         results.selectedModel = result.model;
         sendUpdate("model", "completed", { 
           selectedModel: result.model,
@@ -145,7 +152,8 @@ export async function runAnalysisJob(
           message,
           intent,
           sentimentResult.sentiment,
-          style
+          style,
+          apiKeys.gemini
         );
         results.optimizedPrompt = result.optimizedPrompt;
         sendUpdate("prompt", "completed", { optimizedPrompt: result.optimizedPrompt });
@@ -186,7 +194,8 @@ export async function runAnalysisJob(
         results.intent,
         results.sentiment,
         model,
-        optimizedPrompt
+        optimizedPrompt,
+        apiKeys.gemini
       );
       results.parameters = parametersResult;
       sendUpdate("parameters", "completed", { parameters: parametersResult });
@@ -203,7 +212,8 @@ export async function runAnalysisJob(
         const aiResponse = await generateResponse(
           results.optimizedPrompt,
           results.selectedModel,
-          results.parameters
+          results.parameters,
+          apiKeys.gemini
         );
         sendUpdate("generating", "completed", { 
           message: `Response generated using ${results.selectedModel}` 

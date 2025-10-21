@@ -29,7 +29,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         if (message.type === "analyze") {
           const jobId = randomUUID();
-          const { message: userMessage, useDeepResearch = false } = message.payload;
+          const { message: userMessage, useDeepResearch = false, apiKeys } = message.payload;
 
           if (!userMessage || typeof userMessage !== "string") {
             ws.send(JSON.stringify({
@@ -37,6 +37,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
               phase: "error",
               status: "error",
               error: "Message is required"
+            }));
+            return;
+          }
+
+          // Validate API keys
+          if (!apiKeys || !apiKeys.gemini) {
+            ws.send(JSON.stringify({
+              jobId,
+              phase: "error",
+              status: "error",
+              error: "Gemini API key is required. Please configure your API keys in Settings."
             }));
             return;
           }
@@ -50,7 +61,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Run the analysis job with real-time updates
           await runAnalysisJob(
-            { jobId, message: userMessage, useDeepResearch },
+            { jobId, message: userMessage, useDeepResearch, apiKeys },
             ws
           );
         }

@@ -6,12 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Settings as SettingsIcon, Key, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-
-interface APIKeys {
-  gemini: string;
-  openai: string;
-  anthropic: string;
-}
+import { getStoredAPIKeys, saveAPIKeys, clearAPIKeys, hasAnyAPIKey, type APIKeys } from "@/lib/api-keys";
 
 export default function Settings() {
   const { toast } = useToast();
@@ -28,20 +23,15 @@ export default function Settings() {
 
   useEffect(() => {
     // Load API keys from localStorage
-    const storedKeys = localStorage.getItem("ai_api_keys");
+    const storedKeys = getStoredAPIKeys();
     if (storedKeys) {
-      try {
-        const parsed = JSON.parse(storedKeys);
-        setKeys(parsed);
-      } catch (error) {
-        console.error("Failed to parse stored API keys");
-      }
+      setKeys(storedKeys);
     }
   }, []);
 
   const handleSave = () => {
     // Validate at least one key is provided
-    if (!keys.gemini && !keys.openai && !keys.anthropic) {
+    if (!hasAnyAPIKey(keys)) {
       toast({
         title: "No API Keys",
         description: "Please provide at least one API key to use the application.",
@@ -51,7 +41,7 @@ export default function Settings() {
     }
 
     // Save to localStorage
-    localStorage.setItem("ai_api_keys", JSON.stringify(keys));
+    saveAPIKeys(keys);
     
     toast({
       title: "API Keys Saved",
@@ -65,7 +55,7 @@ export default function Settings() {
       openai: "",
       anthropic: "",
     });
-    localStorage.removeItem("ai_api_keys");
+    clearAPIKeys();
     
     toast({
       title: "API Keys Cleared",
@@ -73,7 +63,7 @@ export default function Settings() {
     });
   };
 
-  const hasAnyKey = keys.gemini || keys.openai || keys.anthropic;
+  const hasKeys = hasAnyAPIKey(keys);
 
   return (
     <div className="min-h-screen bg-background">
@@ -102,7 +92,7 @@ export default function Settings() {
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-semibold">API Keys</h2>
-                {hasAnyKey && (
+                {hasKeys && (
                   <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-500">
                     <CheckCircle2 className="h-4 w-4" />
                     <span>Keys configured</span>
