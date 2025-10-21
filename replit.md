@@ -2,7 +2,9 @@
 
 ## Overview
 
-This is an AI middleware platform that provides real-time analysis and intelligent prompt optimization for AI interactions. The system analyzes user prompts across multiple dimensions (intent, sentiment, style, security), selects optimal AI models, and optimizes prompts before sending them to AI providers. It features a split-screen interface with a chat panel and a live analysis dashboard that displays real-time processing insights.
+This is an open-source AI middleware platform that provides real-time analysis and intelligent prompt optimization for AI interactions. The system analyzes user prompts across multiple dimensions (intent, sentiment, style, security), selects optimal AI models, and optimizes prompts before sending them to AI providers. It features a split-screen interface with a chat panel and a live analysis dashboard that displays real-time processing insights.
+
+**Open-Source Distribution Model**: Users provide their own API keys for AI providers (Gemini, OpenAI, Anthropic). Keys are stored locally in the browser and never transmitted to or stored on our servers. This ensures privacy and allows anyone to run the application with their own credentials.
 
 ## User Preferences
 
@@ -34,6 +36,12 @@ Preferred communication style: Simple, everyday language.
 - Real-time log stream displays step-by-step middleware processing
 - Analysis dashboard shows structured data fields (intent, sentiment, security score, etc.)
 - Modal confirmation for deep research mode with estimated time warnings
+- Settings page (`/settings`) for API key configuration
+- Alert system when API keys are missing or invalid
+
+**Routing**
+- `/` - Home page with chat interface and analysis dashboard
+- `/settings` - API key management and configuration
 
 ### Backend Architecture
 
@@ -50,6 +58,9 @@ Preferred communication style: Simple, everyday language.
 
 **AI Integration Layer**
 - Google Gemini AI (via `@google/genai` SDK) as primary analysis provider
+- **Per-Request API Client Creation**: No singleton AI client - each request creates a new GoogleGenAI instance with user-provided API key
+- User-provided API keys passed through WebSocket payloads to backend
+- Server validates API keys before processing analysis requests
 - Modular analysis functions in `gemini-analysis.ts`:
   - Intent detection (categorizes user goal)
   - Sentiment analysis (positive/neutral/negative)
@@ -58,6 +69,7 @@ Preferred communication style: Simple, everyday language.
   - Model selection (chooses appropriate Gemini model)
   - Prompt optimization (rewrites for better results)
   - Parameter tuning (temperature, top_p, max_tokens)
+- All analysis functions accept `apiKey` parameter for dynamic client creation
 
 **Development & Production Modes**
 - Vite middleware integration in development for HMR and SSR
@@ -82,13 +94,40 @@ Preferred communication style: Simple, everyday language.
 - Migrations output to `./migrations` directory
 - `db:push` script for schema synchronization
 
+### API Key Management (Open-Source Model)
+
+**Client-Side Storage**
+- API keys stored in browser localStorage under key: `"ai_api_keys"`
+- Utility module: `client/src/lib/api-keys.ts` provides:
+  - `getStoredAPIKeys()`: Retrieve keys from localStorage
+  - `saveAPIKeys(keys)`: Save keys to localStorage
+  - `clearAPIKeys()`: Remove all keys
+  - `hasAnyAPIKey(keys)`: Check if any key exists
+  - `hasGeminiKey(keys)`: Check if required Gemini key exists
+- Keys interface: `{ gemini: string, openai: string, anthropic: string }`
+
+**Security & Privacy**
+- Keys NEVER sent to or stored on application servers
+- Keys transmitted only directly to respective AI providers (Gemini, OpenAI, Anthropic)
+- localStorage is browser-specific and domain-scoped
+- Users can clear keys at any time
+- Privacy notice displayed on Settings page
+
+**Backend Flow**
+1. Client includes `apiKeys` in WebSocket message payload
+2. Server validates Gemini key present (required for analysis)
+3. API key passed to analysis orchestrator and all analysis functions
+4. Each analysis creates temporary AI client instance with user's key
+5. Key discarded after request completes
+
 ### External Dependencies
 
 **AI Provider Services**
 - Google Gemini AI (primary): Multi-model support, analysis capabilities
-  - API Key: `GEMINI_API_KEY` environment variable
+  - API Keys: User-provided via Settings page (stored in browser localStorage)
   - Models: Gemini 2.5 Flash-Lite (fast), Gemini 2.5 Pro (deep research)
-- Anthropic SDK included but not actively used in current implementation
+- OpenAI SDK: Integrated for future multi-provider support (optional)
+- Anthropic SDK: Integrated for future multi-provider support (optional)
 
 **Database & Hosting**
 - Neon PostgreSQL: Serverless database with WebSocket support
