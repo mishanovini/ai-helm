@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Header from "@/components/Header";
 import ChatMessage from "@/components/ChatMessage";
 import ChatInput from "@/components/ChatInput";
@@ -8,6 +8,11 @@ import DeepResearchModal from "@/components/DeepResearchModal";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { getStoredAPIKeys, hasGeminiKey } from "@/lib/api-keys";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Link } from "wouter";
 
 interface Message {
   id: string;
@@ -23,6 +28,13 @@ export default function Home() {
   const [showDeepResearchModal, setShowDeepResearchModal] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [hasAPIKeys, setHasAPIKeys] = useState(false);
+
+  // Check for API keys on mount
+  useEffect(() => {
+    const keys = getStoredAPIKeys();
+    setHasAPIKeys(hasGeminiKey(keys));
+  }, []);
 
   const addLog = (message: string, type: LogEntry["type"]) => {
     const timestamp = new Date().toLocaleTimeString('en-US', { 
@@ -124,6 +136,14 @@ export default function Home() {
   const simulateAnalysis = async (userMessage: string, useDeepResearch: boolean = false) => {
     setIsProcessing(true);
     
+    // Check for API keys
+    const apiKeys = getStoredAPIKeys();
+    if (!hasGeminiKey(apiKeys)) {
+      addLog("Error: Gemini API key not configured. Please add your API key in Settings.", "error");
+      setIsProcessing(false);
+      return;
+    }
+    
     if (!isConnected) {
       addLog("WebSocket not connected. Retrying...", "error");
       setIsProcessing(false);
@@ -134,7 +154,8 @@ export default function Home() {
       type: "analyze",
       payload: {
         message: userMessage,
-        useDeepResearch
+        useDeepResearch,
+        apiKeys: apiKeys // Send API keys with the request
       }
     });
 
@@ -187,6 +208,24 @@ export default function Home() {
   return (
     <div className="h-screen flex flex-col bg-background">
       <Header />
+      
+      {!hasAPIKeys && (
+        <div className="px-6 pt-4">
+          <Alert variant="destructive" data-testid="alert-no-api-keys">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between">
+              <span>
+                No API keys configured. Please add your Gemini API key to use the application.
+              </span>
+              <Link href="/settings">
+                <Button variant="outline" size="sm" data-testid="button-go-to-settings">
+                  Go to Settings
+                </Button>
+              </Link>
+            </AlertDescription>
+          </Alert>
+        </div>
+      )}
       
       <div className="flex-1 overflow-hidden p-6">
         <ResizablePanelGroup direction="vertical" className="h-full">
