@@ -12,7 +12,7 @@ import { getStoredAPIKeys, hasAnyAPIKey } from "@/lib/api-keys";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 interface Message {
   id: string;
@@ -22,6 +22,7 @@ interface Message {
 }
 
 export default function Home() {
+  const [location] = useLocation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -30,10 +31,30 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasAPIKeys, setHasAPIKeys] = useState(false);
 
-  // Check for API keys on mount
+  // Check for API keys on mount, route change, and window focus
   useEffect(() => {
-    const keys = getStoredAPIKeys();
-    setHasAPIKeys(hasAnyAPIKey(keys));
+    const checkKeys = () => {
+      const keys = getStoredAPIKeys();
+      setHasAPIKeys(hasAnyAPIKey(keys));
+    };
+    
+    checkKeys();
+  }, [location]); // Re-run when route changes
+
+  // Additional check on window focus/visibility change as safety net
+  useEffect(() => {
+    const checkKeys = () => {
+      const keys = getStoredAPIKeys();
+      setHasAPIKeys(hasAnyAPIKey(keys));
+    };
+    
+    window.addEventListener('focus', checkKeys);
+    window.addEventListener('visibilitychange', checkKeys);
+    
+    return () => {
+      window.removeEventListener('focus', checkKeys);
+      window.removeEventListener('visibilitychange', checkKeys);
+    };
   }, []);
 
   const addLog = (message: string, type: LogEntry["type"]) => {
