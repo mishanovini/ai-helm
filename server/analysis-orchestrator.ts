@@ -5,8 +5,7 @@ import {
   analyzeStyle,
   analyzeSecurityRisk,
   optimizePrompt,
-  tuneParameters,
-  generateResponse
+  tuneParameters
 } from "./gemini-analysis";
 import {
   selectOptimalModel,
@@ -14,6 +13,7 @@ import {
   AvailableProviders,
   ModelOption
 } from "../shared/model-selection";
+import { generateResponse } from "./response-generator";
 
 export interface APIKeys {
   gemini: string;
@@ -241,9 +241,10 @@ export async function runAnalysisJob(
         const selectedModel: ModelOption = results.selectedModel;
         const aiResponse = await generateResponse(
           results.optimizedPrompt,
+          selectedModel.provider,
           selectedModel.model,
           results.parameters,
-          apiKeys.gemini
+          apiKeys
         );
         sendUpdate("generating", "completed", { 
           message: `Response generated using ${selectedModel.displayName} (${results.estimatedCost.displayText})` 
