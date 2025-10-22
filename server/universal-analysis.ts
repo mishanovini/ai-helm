@@ -216,17 +216,23 @@ export async function tuneParameters(
   const systemPrompt = `You are an AI parameter tuner. Based on the task characteristics, recommend optimal parameters:
 - temperature: 0.0-1.0 (lower for factual, higher for creative)
 - top_p: 0.0-1.0 (nucleus sampling, usually 0.9-1.0)
-- max_tokens: 100-4000 (response length)
+- max_tokens: 500-16000 (response length - be generous for comprehensive answers)
 
 Consider:
 - Intent: ${intent}
 - Sentiment: ${sentiment}
 - Task: ${optimizedPrompt.substring(0, 100)}...
 
+Guidelines:
+- Simple questions: 1000-2000 tokens
+- Explanations/tutorials: 3000-6000 tokens
+- Code generation: 4000-8000 tokens
+- Long-form content: 8000-16000 tokens
+
 Respond in this exact format:
 TEMPERATURE: [0.0-1.0]
 TOP_P: [0.0-1.0]
-MAX_TOKENS: [100-4000]`;
+MAX_TOKENS: [500-16000]`;
 
   const response = await runAnalysis(analysisModel, apiKey, systemPrompt, "Tune parameters for this task");
   
@@ -237,11 +243,11 @@ MAX_TOKENS: [100-4000]`;
   
   const temperature = tempMatch ? parseFloat(tempMatch[1]) : 0.7;
   const top_p = topPMatch ? parseFloat(topPMatch[1]) : 1.0;
-  const max_tokens = tokensMatch ? parseInt(tokensMatch[1], 10) : 1000;
+  const max_tokens = tokensMatch ? parseInt(tokensMatch[1], 10) : 4000;
   
   return {
     temperature: Math.min(Math.max(temperature, 0), 1),
     top_p: Math.min(Math.max(top_p, 0), 1),
-    max_tokens: Math.min(Math.max(max_tokens, 100), 4000)
+    max_tokens: Math.min(Math.max(max_tokens, 500), 16000)
   };
 }
