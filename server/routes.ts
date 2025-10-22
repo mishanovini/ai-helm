@@ -2,9 +2,111 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "crypto";
+import type { IncomingMessage } from "http";
 import { storage } from "./storage";
 import { runAnalysisJob } from "./analysis-orchestrator";
 import { validateAPIKey } from "./api-key-validator";
+
+/**
+ * Simple in-memory rate limiter for WebSocket connections
+ * Tracks connection attempts by IP address
+ */
+class RateLimiter {
+  private attempts: Map<string, { count: number; resetTime: number }> = new Map();
+  private maxAttempts: number;
+  private windowMs: number;
+
+  constructor(maxAttempts: number = 100, windowMs: number = 60000) {
+    this.maxAttempts = maxAttempts;
+    this.windowMs = windowMs;
+    
+    // Clean up expired entries every minute
+    setInterval(() => this.cleanup(), 60000);
+  }
+
+  isAllowed(ip: string): boolean {
+    const now = Date.now();
+    const record = this.attempts.get(ip);
+
+    if (!record || now > record.resetTime) {
+      this.attempts.set(ip, { count: 1, resetTime: now + this.windowMs });
+      return true;
+    }
+
+    if (record.count >= this.maxAttempts) {
+      return false;
+    }
+
+    record.count++;
+    return true;
+  }
+
+  private cleanup(): void {
+    const now = Date.now();
+    const entries = Array.from(this.attempts.entries());
+    for (const [ip, record] of entries) {
+      if (now > record.resetTime) {
+        this.attempts.delete(ip);
+      }
+    }
+  }
+}
+
+/**
+ * Validate WebSocket origin in production
+ * Prevents unauthorized domains from connecting
+ */
+function validateOrigin(req: IncomingMessage): boolean {
+  // Allow all origins in development
+  if (process.env.NODE_ENV !== 'production') {
+    return true;
+  }
+
+  const origin = req.headers.origin;
+  
+  // Allow same-origin requests (no origin header)
+  if (!origin) {
+    return true;
+  }
+
+  // In production, configure allowed origins via environment variable
+  // Example: ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS?.split(',') || [])
+    .map(o => o.trim())
+    .filter(o => o.length > 0);
+  
+  // If no allowed origins configured, allow same-origin only
+  if (allowedOrigins.length === 0) {
+    const host = req.headers.host;
+    return origin === `https://${host}` || origin === `http://${host}`;
+  }
+
+  return allowedOrigins.includes(origin);
+}
+
+/**
+ * Extract IP address from request
+ * 
+ * SECURITY: Only trusts X-Forwarded-For when TRUST_PROXY is explicitly enabled.
+ * Otherwise uses socket IP to prevent rate limiting bypass via header spoofing.
+ * 
+ * Set TRUST_PROXY=true in production when behind a trusted reverse proxy (nginx, Cloudflare, etc.)
+ */
+function getClientIP(req: IncomingMessage): string {
+  // Only trust proxy headers if explicitly configured
+  const trustProxy = process.env.TRUST_PROXY === 'true';
+  
+  if (trustProxy) {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) {
+      const ips = (typeof forwarded === 'string' ? forwarded : forwarded[0]).split(',');
+      return ips[0].trim();
+    }
+  }
+  
+  // Always fall back to actual socket IP (cannot be spoofed)
+  return req.socket.remoteAddress || 'unknown';
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
@@ -64,11 +166,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const httpServer = createServer(app);
 
-  // Set up WebSocket server
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+  // Initialize rate limiter (100 requests per minute per IP)
+  const rateLimiter = new RateLimiter(100, 60000);
 
-  wss.on("connection", (ws: WebSocket) => {
-    console.log("WebSocket client connected");
+  // Set up WebSocket server with connection validation
+  const wss = new WebSocketServer({ 
+    server: httpServer, 
+    path: "/ws",
+    verifyClient: (info, callback) => {
+      // Validate origin
+      if (!validateOrigin(info.req)) {
+        console.warn('WebSocket connection rejected: invalid origin', info.req.headers.origin);
+        callback(false, 403, 'Forbidden: Invalid origin');
+        return;
+      }
+
+      // Rate limiting
+      const clientIP = getClientIP(info.req);
+      if (!rateLimiter.isAllowed(clientIP)) {
+        console.warn('WebSocket connection rejected: rate limit exceeded', clientIP);
+        callback(false, 429, 'Too Many Requests');
+        return;
+      }
+
+      callback(true);
+    }
+  });
+
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+    const clientIP = getClientIP(req);
+    console.log("WebSocket client connected", { ip: clientIP, origin: req.headers.origin });
 
     ws.on("message", async (data: string) => {
       try {
