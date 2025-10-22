@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
+import { Link } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Settings as SettingsIcon, Key, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Settings as SettingsIcon, Key, AlertCircle, CheckCircle2, ArrowLeft } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getStoredAPIKeys, saveAPIKeys, clearAPIKeys, hasAnyAPIKey, type APIKeys } from "@/lib/api-keys";
 
@@ -136,9 +137,17 @@ export default function Settings() {
     <div className="min-h-screen bg-background">
       <div className="container max-w-4xl mx-auto p-6">
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <SettingsIcon className="h-8 w-8 text-primary" />
-            <h1 className="text-3xl font-bold">Settings</h1>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <SettingsIcon className="h-8 w-8 text-primary" />
+              <h1 className="text-3xl font-bold">Settings</h1>
+            </div>
+            <Link href="/">
+              <Button variant="outline" data-testid="button-back-to-chat">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Chat
+              </Button>
+            </Link>
           </div>
           <p className="text-muted-foreground">
             Configure your AI provider API keys to use the middleware analysis tool.
