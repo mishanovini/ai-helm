@@ -116,9 +116,11 @@ Preferred communication style: Simple, everyday language.
 
 **Client-Side Storage**
 - API keys stored in browser localStorage under key: `"ai_api_keys"`
+- **Local-First Approach**: Keys saved immediately to localStorage before validation (October 2025 update)
+- Input sanitization: Keys filtered to allow only alphanumeric, hyphens, underscores, and dots
 - Utility module: `client/src/lib/api-keys.ts` provides:
   - `getStoredAPIKeys()`: Retrieve keys from localStorage
-  - `saveAPIKeys(keys)`: Save keys to localStorage
+  - `saveAPIKeys(keys)`: Save keys to localStorage with sanitization
   - `clearAPIKeys()`: Remove all keys
   - `hasAnyAPIKey(keys)`: Check if any key exists
   - `hasGeminiKey(keys)`: Check if required Gemini key exists
@@ -130,6 +132,7 @@ Preferred communication style: Simple, everyday language.
 - localStorage is browser-specific and domain-scoped
 - Users can clear keys at any time
 - Privacy notice displayed on Settings page
+- Input sanitization prevents malformed data or potential script injection
 
 **Backend Flow**
 1. Client includes `apiKeys` in WebSocket message payload

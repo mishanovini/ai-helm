@@ -42,6 +42,9 @@ export default function Settings() {
       return;
     }
 
+    // Save keys to localStorage immediately (local-first approach)
+    saveAPIKeys(keys);
+
     setIsValidating(true);
 
     try {
@@ -58,9 +61,9 @@ export default function Settings() {
 
       if (!response.ok) {
         toast({
-          title: "Validation Failed",
-          description: data.error || "Failed to validate API keys. Please try again.",
-          variant: "destructive",
+          title: "Keys Saved (Validation Failed)",
+          description: "Keys saved locally, but validation failed. You can try using them anyway.",
+          variant: "default",
         });
         return;
       }
@@ -69,7 +72,7 @@ export default function Settings() {
       const { valid, results } = data;
 
       if (!valid) {
-        // Build error message based on validation results
+        // Build warning message based on validation results
         let errorMessage = '';
         
         if (results.gemini && !results.gemini.valid) {
@@ -85,16 +88,14 @@ export default function Settings() {
         }
 
         toast({
-          title: "Invalid API Keys",
-          description: errorMessage || "One or more API keys are invalid.",
-          variant: "destructive",
+          title: "Keys Saved (Validation Warning)",
+          description: errorMessage || "Keys saved, but some may be invalid. You can still try using them.",
+          variant: "default",
         });
         return;
       }
 
-      // All validations passed - save to localStorage
-      saveAPIKeys(keys);
-      
+      // All validations passed
       // Build success message
       const validKeys = [];
       if (results.gemini?.valid) validKeys.push('Gemini');
@@ -108,9 +109,9 @@ export default function Settings() {
     } catch (error: any) {
       console.error('API key validation error:', error);
       toast({
-        title: "Validation Error",
-        description: "Failed to validate API keys. Please check your connection and try again.",
-        variant: "destructive",
+        title: "Keys Saved (Validation Unavailable)",
+        description: "Keys saved locally, but couldn't validate. You can try using them anyway.",
+        variant: "default",
       });
     } finally {
       setIsValidating(false);
