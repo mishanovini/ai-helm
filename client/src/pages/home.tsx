@@ -30,7 +30,7 @@ export default function Home() {
   const [pendingMessage, setPendingMessage] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasAPIKeys, setHasAPIKeys] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastAssistantMessageRef = useRef<HTMLDivElement>(null);
 
   // Check for API keys on mount, route change, and window focus
   useEffect(() => {
@@ -58,9 +58,11 @@ export default function Home() {
     };
   }, []);
 
-  // Auto-scroll to bottom when new messages are added
+  // Auto-scroll to top of last assistant message when new messages are added
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (lastAssistantMessageRef.current) {
+      lastAssistantMessageRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }, [messages]);
 
   const addLog = (message: string, type: LogEntry["type"]) => {
@@ -158,7 +160,7 @@ export default function Home() {
         timestamp
       }]);
     } else if (phase === "complete" && status === "completed") {
-      addLog("Analysis complete!", "success");
+      addLog("✓ Pipeline complete - All analysis phases finished and response delivered successfully", "success");
       setIsProcessing(false);
     } else if (status === "error") {
       addLog(`Error in ${phase}: ${error || "Unknown error"}`, "error");
@@ -286,16 +288,22 @@ export default function Home() {
                           </div>
                         </div>
                       ) : (
-                        messages.map(msg => (
-                          <ChatMessage
-                            key={msg.id}
-                            role={msg.role}
-                            content={msg.content}
-                            timestamp={msg.timestamp}
-                          />
-                        ))
+                        messages.map((msg, index) => {
+                          // Attach ref to the last assistant message
+                          const isLastAssistant = msg.role === "assistant" && 
+                            index === messages.length - 1;
+                          
+                          return (
+                            <ChatMessage
+                              key={msg.id}
+                              ref={isLastAssistant ? lastAssistantMessageRef : null}
+                              role={msg.role}
+                              content={msg.content}
+                              timestamp={msg.timestamp}
+                            />
+                          );
+                        })
                       )}
-                      <div ref={messagesEndRef} />
                     </div>
                   </ScrollArea>
                   <div className="mt-4">
