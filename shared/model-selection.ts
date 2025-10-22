@@ -198,6 +198,7 @@ export function selectOptimalModel(
   availableProviders: AvailableProviders
 ): { primary: ModelOption; fallback: ModelOption | null; reasoning: string } {
   
+  const lowerPrompt = prompt.toLowerCase();
   const analysis = analyzePrompt(prompt);
   const availableModels = MODEL_CATALOG.filter(m => availableProviders[m.provider]);
   
@@ -221,8 +222,20 @@ export function selectOptimalModel(
   
   // STEP 2: Default to lightweight models unless there's a clear reason not to
   // Most prompts can be handled by lightweight models efficiently
+  
+  // Detect substantive creative writing (articles, essays) vs micro-copy (tweets)
+  const isSubstantiveCreative = analysis.taskType === 'creative' && (
+    // Substantive deliverables
+    lowerPrompt.match(/\b(article|essay|blog post|screenplay|story|novel|chapter)\b/) ||
+    // Quality adjectives indicating depth
+    lowerPrompt.match(/\b(thoughtful|detailed|comprehensive|in-depth|nuanced|elaborate|polished)\b/) ||
+    // Length indicates substantive content
+    (lowerPrompt.includes('write') && prompt.length > 300)
+  );
+  
   const needsPremiumModel = 
     analysis.requiresDeepReasoning || 
+    isSubstantiveCreative ||
     (analysis.taskType === 'coding' && (
       prompt.toLowerCase().includes('refactor') ||
       prompt.toLowerCase().includes('architect') ||
@@ -318,15 +331,15 @@ export function selectOptimalModel(
       break;
       
     case 'creative':
-      // Claude models excel at creative writing
-      const creativePriority = ['claude-opus-4-1', 'claude-sonnet-4-5', 'gpt-5'];
+      // Claude models excel at creative writing, Gemini Pro as fallback
+      const creativePriority = ['claude-opus-4-1', 'claude-sonnet-4-5', 'gpt-5', 'gemini-2.5-pro'];
       for (const modelId of creativePriority) {
         const model = availableModels.find(m => m.model === modelId);
         if (model) {
           return {
             primary: model,
-            fallback: availableModels.find(m => m.provider === 'anthropic' || m.provider === 'openai') || null,
-            reasoning: `Creative writing task. ${model.displayName} excels at style preservation and creative content`
+            fallback: availableModels.find(m => m.model !== modelId && (m.provider === 'anthropic' || m.provider === 'openai' || m.model === 'gemini-2.5-pro')) || null,
+            reasoning: `Creative writing task. ${model.displayName} excels at ${model.provider === 'anthropic' ? 'style preservation and creative content' : 'creative content generation'}`
           };
         }
       }
