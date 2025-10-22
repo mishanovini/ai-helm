@@ -65,6 +65,13 @@ async function generateGeminiResponse(
     }
   });
 
+  // Debug logging
+  if (!response.text) {
+    console.error('Gemini response.text is empty. Full response:', JSON.stringify(response, null, 2));
+    console.error('Candidates:', response.candidates);
+    console.error('Prompt finish reason:', response.candidates?.[0]?.finishReason);
+  }
+
   return response.text || "I apologize, but I couldn't generate a response at this time.";
 }
 

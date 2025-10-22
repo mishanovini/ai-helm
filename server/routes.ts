@@ -19,12 +19,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         anthropic: { valid: false, error: null }
       };
 
-      // Validate Gemini key (required)
+      // Validate Gemini key (recommended but optional)
       if (gemini) {
         const geminiResult = await validateAPIKey('gemini', gemini);
         results.gemini = geminiResult;
-      } else {
-        results.gemini = { valid: false, error: 'Gemini API key is required' };
       }
 
       // Validate OpenAI key (optional)
@@ -39,8 +37,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         results.anthropic = anthropicResult;
       }
 
-      // Check if at least Gemini is valid
-      const isValid = results.gemini.valid;
+      // Check if at least ONE provider is valid
+      const isValid = results.gemini.valid || results.openai.valid || results.anthropic.valid;
 
       res.status(200).json({
         valid: isValid,
@@ -90,13 +88,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return;
           }
 
-          // Validate API keys
-          if (!apiKeys || !apiKeys.gemini) {
+          // Validate API keys - require at least one provider
+          if (!apiKeys || (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic)) {
             ws.send(JSON.stringify({
               jobId,
               phase: "error",
               status: "error",
-              error: "Gemini API key is required. Please configure your API keys in Settings."
+              error: "At least one API key is required. Please configure your API keys in Settings."
             }));
             return;
           }

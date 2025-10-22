@@ -9,13 +9,13 @@ export default function Header() {
         <Brain className="h-6 w-6 text-primary" />
         <Link href="/">
           <h1 className="text-lg font-semibold cursor-pointer hover:text-primary transition-colors" data-testid="text-app-title">
-            AI Middleware & Analysis Tool
+            AI Helm
           </h1>
         </Link>
       </div>
       <div className="flex items-center gap-3">
         <div className="text-xs text-muted-foreground">
-          Multi-Provider Analysis
+          Universal AI Interface
         </div>
         <Link href="/settings">
           <Button variant="ghost" size="icon" data-testid="button-settings">

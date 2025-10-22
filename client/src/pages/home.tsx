@@ -8,7 +8,7 @@ import DeepResearchModal from "@/components/DeepResearchModal";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
-import { getStoredAPIKeys, hasGeminiKey } from "@/lib/api-keys";
+import { getStoredAPIKeys, hasAnyAPIKey } from "@/lib/api-keys";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -33,7 +33,7 @@ export default function Home() {
   // Check for API keys on mount
   useEffect(() => {
     const keys = getStoredAPIKeys();
-    setHasAPIKeys(hasGeminiKey(keys));
+    setHasAPIKeys(hasAnyAPIKey(keys));
   }, []);
 
   const addLog = (message: string, type: LogEntry["type"]) => {
@@ -146,8 +146,8 @@ export default function Home() {
     
     // Check for API keys
     const apiKeys = getStoredAPIKeys();
-    if (!hasGeminiKey(apiKeys)) {
-      addLog("Error: Gemini API key not configured. Please add your API key in Settings.", "error");
+    if (!hasAnyAPIKey(apiKeys)) {
+      addLog("Error: No API keys configured. Please add at least one API key in Settings.", "error");
       setIsProcessing(false);
       return;
     }
@@ -223,7 +223,7 @@ export default function Home() {
             <AlertCircle className="h-4 w-4" />
             <AlertDescription className="flex items-center justify-between">
               <span>
-                No API keys configured. Please add your Gemini API key to use the application.
+                No API keys configured. Please add at least one AI provider API key to use the application.
               </span>
               <Link href="/settings">
                 <Button variant="outline" size="sm" data-testid="button-go-to-settings">
@@ -249,10 +249,10 @@ export default function Home() {
                         <div className="flex items-center justify-center h-64">
                           <div className="text-center">
                             <p className="text-muted-foreground mb-2">
-                              Welcome to AI Middleware & Analysis Tool
+                              Welcome to AI Helm, your universal AI interface
                             </p>
                             <p className="text-sm text-muted-foreground">
-                              Send a message to see real-time analysis and processing
+                              We automatically select and fine-tune the optimal model for every prompt
                             </p>
                           </div>
                         </div>

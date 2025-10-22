@@ -55,10 +55,18 @@ export async function runAnalysisJob(
   };
 
   try {
+    // Check if Gemini is available for analysis phases
+    const hasGemini = !!apiKeys.gemini;
+    
     // Phase 1: Run independent analyses in parallel with promise-based dependencies
     
-    // Intent (independent)
+    // Intent (independent) - Gemini only
     promises.intent = (async () => {
+      if (!hasGemini) {
+        results.intent = "general";
+        sendUpdate("intent", "completed", { intent: "general" });
+        return "general";
+      }
       sendUpdate("intent", "processing");
       try {
         const result = await analyzeIntent(message, apiKeys.gemini);
@@ -67,13 +75,22 @@ export async function runAnalysisJob(
         return result.intent;
       } catch (error: any) {
         sendUpdate("intent", "error", undefined, error.message);
-        hasError = true;
-        throw error;
+        results.intent = "general"; // Fallback
+        return "general";
       }
     })();
     
-    // Sentiment (independent)
+    // Sentiment (independent) - Gemini only
     promises.sentiment = (async () => {
+      if (!hasGemini) {
+        results.sentiment = "neutral";
+        results.sentimentDetail = "Not analyzed";
+        sendUpdate("sentiment", "completed", { 
+          sentiment: "neutral", 
+          sentimentDetail: "Not analyzed" 
+        });
+        return { sentiment: "neutral", detail: "Not analyzed" };
+      }
       sendUpdate("sentiment", "processing");
       try {
         const result = await analyzeSentiment(message, apiKeys.gemini);
@@ -86,13 +103,19 @@ export async function runAnalysisJob(
         return { sentiment: result.sentiment, detail: result.detail };
       } catch (error: any) {
         sendUpdate("sentiment", "error", undefined, error.message);
-        hasError = true;
-        throw error;
+        results.sentiment = "neutral"; // Fallback
+        results.sentimentDetail = "Error during analysis";
+        return { sentiment: "neutral", detail: "Error during analysis" };
       }
     })();
     
-    // Style (independent)
+    // Style (independent) - Gemini only
     promises.style = (async () => {
+      if (!hasGemini) {
+        results.style = "neutral";
+        sendUpdate("style", "completed", { style: "neutral" });
+        return "neutral";
+      }
       sendUpdate("style", "processing");
       try {
         const result = await analyzeStyle(message, apiKeys.gemini);
@@ -101,13 +124,22 @@ export async function runAnalysisJob(
         return result.style;
       } catch (error: any) {
         sendUpdate("style", "error", undefined, error.message);
-        hasError = true;
-        throw error;
+        results.style = "neutral"; // Fallback
+        return "neutral";
       }
     })();
     
-    // Security (independent)
+    // Security (independent) - Gemini only
     promises.security = (async () => {
+      if (!hasGemini) {
+        results.securityScore = 5;
+        results.securityExplanation = "Not analyzed";
+        sendUpdate("security", "completed", { 
+          securityScore: 5,
+          securityExplanation: "Not analyzed"
+        });
+        return { score: 5, explanation: "Not analyzed" };
+      }
       sendUpdate("security", "processing");
       try {
         const result = await analyzeSecurityRisk(message, apiKeys.gemini);
@@ -120,8 +152,9 @@ export async function runAnalysisJob(
         return result;
       } catch (error: any) {
         sendUpdate("security", "error", undefined, error.message);
-        hasError = true;
-        throw error;
+        results.securityScore = 5; // Fallback
+        results.securityExplanation = "Error during analysis";
+        return { score: 5, explanation: "Error during analysis" };
       }
     })();
     
@@ -168,8 +201,13 @@ export async function runAnalysisJob(
       }
     })();
     
-    // Prompt Optimization (depends on intent, sentiment, style)
+    // Prompt Optimization (depends on intent, sentiment, style) - Gemini only
     promises.prompt = (async () => {
+      if (!hasGemini) {
+        results.optimizedPrompt = message; // Use original message
+        sendUpdate("prompt", "completed", { optimizedPrompt: message });
+        return message;
+      }
       sendUpdate("prompt", "processing");
       try {
         const [intent, sentimentResult, style] = await Promise.all([
@@ -189,8 +227,8 @@ export async function runAnalysisJob(
         return result.optimizedPrompt;
       } catch (error: any) {
         sendUpdate("prompt", "error", undefined, error.message);
-        hasError = true;
-        throw error;
+        results.optimizedPrompt = message; // Fallback to original
+        return message;
       }
     })();
 
@@ -210,27 +248,42 @@ export async function runAnalysisJob(
       return;
     }
 
-    // Phase 2: Parameter tuning (depends on model and optimized prompt)
-    sendUpdate("parameters", "processing");
+    // Phase 2: Parameter tuning (depends on model and optimized prompt) - Gemini only
     let parametersResult: any;
-    try {
-      const [modelOption, optimizedPrompt] = await Promise.all([
-        promises.model,
-        promises.prompt
-      ]);
-      
-      parametersResult = await tuneParameters(
-        results.intent,
-        results.sentiment,
-        modelOption.model,
-        optimizedPrompt,
-        apiKeys.gemini
-      );
-      results.parameters = parametersResult;
-      sendUpdate("parameters", "completed", { parameters: parametersResult });
-    } catch (error: any) {
-      sendUpdate("parameters", "error", undefined, error.message);
-      hasError = true;
+    if (hasGemini) {
+      sendUpdate("parameters", "processing");
+      try {
+        const [modelOption, optimizedPrompt] = await Promise.all([
+          promises.model,
+          promises.prompt
+        ]);
+        
+        parametersResult = await tuneParameters(
+          results.intent,
+          results.sentiment,
+          modelOption.model,
+          optimizedPrompt,
+          apiKeys.gemini
+        );
+        results.parameters = parametersResult;
+        sendUpdate("parameters", "completed", { parameters: parametersResult });
+      } catch (error: any) {
+        sendUpdate("parameters", "error", undefined, error.message);
+        // Use default parameters as fallback
+        results.parameters = {
+          temperature: 0.7,
+          top_p: 1.0,
+          max_tokens: 1000
+        };
+      }
+    } else {
+      // Use default parameters when Gemini isn't available
+      results.parameters = {
+        temperature: 0.7,
+        top_p: 1.0,
+        max_tokens: 1000
+      };
+      sendUpdate("parameters", "completed", { parameters: results.parameters });
     }
 
     // Phase 3: Generate actual AI response using selected model

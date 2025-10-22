@@ -150,7 +150,7 @@ export default function Settings() {
             </Link>
           </div>
           <p className="text-muted-foreground">
-            Configure your AI provider API keys to use the middleware analysis tool.
+            Configure at least one AI provider API key. Gemini is recommended for full feature access.
           </p>
         </div>
 
@@ -181,7 +181,7 @@ export default function Settings() {
                 <Label htmlFor="gemini-key" className="flex items-center gap-2">
                   <Key className="h-4 w-4" />
                   Google Gemini API Key
-                  <span className="text-xs text-muted-foreground">(Primary - Required)</span>
+                  <span className="text-xs text-muted-foreground">(Recommended)</span>
                 </Label>
                 <div className="flex gap-2">
                   <Input
