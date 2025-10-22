@@ -287,7 +287,7 @@ export default function Settings() {
                 </p>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <Button 
                   onClick={handleSave} 
                   disabled={isValidating}
@@ -303,6 +303,14 @@ export default function Settings() {
                 >
                   Clear All Keys
                 </Button>
+                <div className="ml-auto">
+                  <Link href="/">
+                    <Button variant="default" data-testid="button-back-to-chat-bottom">
+                      <ArrowLeft className="h-4 w-4 mr-2" />
+                      Back to Chat
+                    </Button>
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
