@@ -56,7 +56,7 @@ export default function Home() {
 
     // Handle different phases of analysis
     if (phase === "started") {
-      addLog("Starting real-time analysis with Gemini 2.5 Flash-Lite...", "info");
+      addLog("Starting intelligent analysis pipeline...", "info");
       // Reset analysis data for new analysis
       setAnalysisData({} as AnalysisData);
     } else if (phase === "intent" && status === "completed") {
@@ -89,11 +89,19 @@ export default function Home() {
       } as AnalysisData));
     } else if (phase === "model" && status === "completed") {
       setLogs(prev => prev.filter(log => log.message !== "Selecting optimal model..."));
-      addLog(`Model selected: ${payload.selectedModel}`, "success");
+      addLog(`Model: ${payload.modelDisplayName || payload.selectedModel} (${payload.estimatedCost || '~$0.001'})`, "success");
+      if (payload.reasoning) {
+        addLog(`Selection: ${payload.reasoning}`, "info");
+      }
       setAnalysisData(prev => ({ 
         ...prev, 
         selectedModel: payload.selectedModel,
-        modelProvider: payload.modelProvider 
+        modelDisplayName: payload.modelDisplayName,
+        modelProvider: payload.modelProvider,
+        reasoning: payload.reasoning,
+        fallbackModel: payload.fallbackModel,
+        estimatedCost: payload.estimatedCost,
+        costBreakdown: payload.costBreakdown
       } as AnalysisData));
     } else if (phase === "prompt" && status === "completed") {
       setLogs(prev => prev.filter(log => log.message !== "Optimizing prompt..."));

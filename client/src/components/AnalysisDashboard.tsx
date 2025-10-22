@@ -12,7 +12,16 @@ export interface AnalysisData {
   securityScore: number;
   securityExplanation?: string;
   selectedModel: string;
-  modelProvider: "Gemini";
+  modelDisplayName?: string;
+  modelProvider?: "gemini" | "openai" | "anthropic";
+  reasoning?: string;
+  fallbackModel?: string;
+  estimatedCost?: string;
+  costBreakdown?: {
+    input: number;
+    output: number;
+    total: string;
+  };
   optimizedPrompt: string;
   parameters: Record<string, number | string>;
 }
@@ -94,12 +103,31 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                   <Sparkles className="h-3 w-3" />
                   Selected Model
                 </label>
-                <div className="mt-1.5">
+                <div className="mt-1.5 space-y-2">
                   {data.selectedModel ? (
-                    <Badge className="bg-chart-4/20 text-chart-4" data-testid="badge-model">
-                      {getProviderIcon(data.modelProvider || "Gemini")}
-                      <span className="ml-1">{data.selectedModel}</span>
-                    </Badge>
+                    <>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge className="bg-chart-4/20 text-chart-4" data-testid="badge-model">
+                          {getProviderIcon(data.modelProvider || "gemini")}
+                          <span className="ml-1">{data.modelDisplayName || data.selectedModel}</span>
+                        </Badge>
+                        {data.estimatedCost && (
+                          <Badge variant="outline" className="text-xs" data-testid="badge-cost">
+                            {data.estimatedCost}
+                          </Badge>
+                        )}
+                      </div>
+                      {data.reasoning && (
+                        <p className="text-xs text-muted-foreground leading-relaxed" data-testid="text-model-reasoning">
+                          {data.reasoning}
+                        </p>
+                      )}
+                      {data.fallbackModel && (
+                        <p className="text-xs text-muted-foreground">
+                          Fallback: {data.fallbackModel}
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <span className="text-sm text-muted-foreground animate-pulse">Selecting...</span>
                   )}

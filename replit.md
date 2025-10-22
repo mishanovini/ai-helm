@@ -57,19 +57,37 @@ Preferred communication style: Simple, everyday language.
 - WebSocket sends incremental updates for each phase (processing/completed/error states)
 
 **AI Integration Layer**
-- Google Gemini AI (via `@google/genai` SDK) as primary analysis provider
+- **Gemini AI Required**: All analysis phases (intent, sentiment, style, security, prompt optimization) use Gemini as the primary analysis provider
 - **Per-Request API Client Creation**: No singleton AI client - each request creates a new GoogleGenAI instance with user-provided API key
 - User-provided API keys passed through WebSocket payloads to backend
-- Server validates API keys before processing analysis requests
+- Server validates Gemini key presence before processing (required)
 - Modular analysis functions in `gemini-analysis.ts`:
   - Intent detection (categorizes user goal)
   - Sentiment analysis (positive/neutral/negative)
   - Style inference (formal, casual, technical, etc.)
   - Security risk scoring (0-10 scale with explanation)
-  - Model selection (chooses appropriate Gemini model)
   - Prompt optimization (rewrites for better results)
   - Parameter tuning (temperature, top_p, max_tokens)
 - All analysis functions accept `apiKey` parameter for dynamic client creation
+
+**Intelligent Model Selection (`shared/model-selection.ts`)**
+- Automated decision tree selects optimal AI model for final response generation
+- **Latest Models Only**: GPT-5/Mini/Nano, Claude Sonnet 4.5/Haiku 4.5/Opus 4.1, Gemini 2.5 Pro/Flash/Flash-Lite
+- **Lightweight Priority**: Defaults to ultra-cheap models ($0.10-$0.50 per 1M tokens) unless premium indicators detected:
+  - Escalates for: complex coding keywords (refactor, architect), deep math proofs, long prompts (>2000 chars), explicit "complex/difficult"
+- **Selection Criteria**:
+  1. Large context (>200K tokens) → Gemini 2.5 Pro (only 1M token window)
+  2. Standard tasks → Gemini Flash-Lite ($0.10) or GPT-5 Nano ($0.15)
+  3. Complex coding → Claude Sonnet 4.5 (77.2% SWE-bench)
+  4. Advanced math → Gemini 2.5 Pro (86.7% AIME)
+  5. Creative writing → Claude Opus 4.1
+  6. Conversation → GPT-5
+  7. Deep reasoning → Claude Opus/Sonnet 4.5
+  8. Multimodal (image/video) → Gemini 2.5 Pro/Flash
+- **Partial Provider Support**: Works with 1-3 API providers (Gemini/OpenAI/Anthropic)
+- **Cost Transparency**: Displays estimated cost before generation (no confirmation needed)
+- **Selection Reasoning**: Explains why specific model was chosen ("Standard task. Using cost-efficient Gemini 2.5 Flash-Lite (0.1¢ per 1K input tokens)")
+- Returns primary + fallback model (future retry logic placeholder)
 
 **Development & Production Modes**
 - Vite middleware integration in development for HMR and SSR
