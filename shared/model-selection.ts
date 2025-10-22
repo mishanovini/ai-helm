@@ -36,7 +36,25 @@ export interface PromptAnalysis {
   requiresDeepReasoning: boolean;
 }
 
-// Complete model catalog
+// Pricing info per 1M tokens (input/output)
+export interface ModelPricing {
+  input: number;
+  output: number;
+}
+
+export const MODEL_PRICING: Record<string, ModelPricing> = {
+  'gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
+  'gemini-2.5-flash': { input: 0.30, output: 2.50 },
+  'gemini-2.5-pro': { input: 1.25, output: 10.00 }, // Base tier <200K tokens
+  'gpt-5-nano': { input: 0.15, output: 1.50 },
+  'gpt-5-mini': { input: 0.50, output: 5.00 },
+  'gpt-5': { input: 2.00, output: 8.00 }, // Estimated standard pricing
+  'claude-haiku-4-5': { input: 1.00, output: 5.00 },
+  'claude-sonnet-4-5': { input: 3.00, output: 15.00 },
+  'claude-opus-4-1': { input: 15.00, output: 75.00 },
+};
+
+// Complete model catalog (ONLY latest versions)
 export const MODEL_CATALOG: ModelOption[] = [
   // Gemini Models
   {
@@ -67,7 +85,7 @@ export const MODEL_CATALOG: ModelOption[] = [
     strengths: ['math', 'science', 'long-context', 'coding', 'web-dev']
   },
   
-  // OpenAI Models
+  // OpenAI Models (latest generation only)
   {
     provider: 'openai',
     model: 'gpt-5-nano',
@@ -95,26 +113,8 @@ export const MODEL_CATALOG: ModelOption[] = [
     contextWindow: 256000,
     strengths: ['conversation', 'multimodal', 'reasoning', 'general']
   },
-  {
-    provider: 'openai',
-    model: 'gpt-4o',
-    displayName: 'GPT-4o',
-    costTier: 'medium',
-    speedTier: 'medium',
-    contextWindow: 128000,
-    strengths: ['legacy', 'stable', 'multimodal', 'audio']
-  },
   
-  // Anthropic Models
-  {
-    provider: 'anthropic',
-    model: 'claude-haiku-3-5',
-    displayName: 'Claude Haiku 3.5',
-    costTier: 'ultra-low',
-    speedTier: 'ultra-fast',
-    contextWindow: 200000,
-    strengths: ['speed', 'cost', 'simple-tasks']
-  },
+  // Anthropic Models (latest generation only)
   {
     provider: 'anthropic',
     model: 'claude-haiku-4-5',
@@ -123,15 +123,6 @@ export const MODEL_CATALOG: ModelOption[] = [
     speedTier: 'ultra-fast',
     contextWindow: 200000,
     strengths: ['speed', 'coding', 'extended-thinking', 'ui-scaffolding']
-  },
-  {
-    provider: 'anthropic',
-    model: 'claude-sonnet-4',
-    displayName: 'Claude Sonnet 4',
-    costTier: 'medium',
-    speedTier: 'medium',
-    contextWindow: 200000,
-    strengths: ['balanced', 'coding', 'business', 'multi-step']
   },
   {
     provider: 'anthropic',
@@ -144,21 +135,12 @@ export const MODEL_CATALOG: ModelOption[] = [
   },
   {
     provider: 'anthropic',
-    model: 'claude-opus-4',
-    displayName: 'Claude Opus 4',
-    costTier: 'premium',
-    speedTier: 'slow',
-    contextWindow: 200000,
-    strengths: ['deep-reasoning', 'security-audits', 'precision', 'complex']
-  },
-  {
-    provider: 'anthropic',
     model: 'claude-opus-4-1',
     displayName: 'Claude Opus 4.1',
     costTier: 'premium',
     speedTier: 'slow',
     contextWindow: 200000,
-    strengths: ['creative', 'edge-cases', 'code-review', 'polish']
+    strengths: ['creative', 'edge-cases', 'code-review', 'polish', 'deep-reasoning']
   },
 ];
 
@@ -237,16 +219,27 @@ export function selectOptimalModel(
     throw new Error(`Prompt too large (${analysis.estimatedTokens.toLocaleString()} tokens). Please add Gemini API key to handle large contexts.`);
   }
   
-  // STEP 2: Simple tasks → Try lightweight models first
-  if (analysis.isSimpleTask && !analysis.requiresDeepReasoning) {
-    // Priority order for simple tasks
+  // STEP 2: Default to lightweight models unless there's a clear reason not to
+  // Most prompts can be handled by lightweight models efficiently
+  const needsPremiumModel = 
+    analysis.requiresDeepReasoning || 
+    (analysis.taskType === 'coding' && (
+      prompt.toLowerCase().includes('refactor') ||
+      prompt.toLowerCase().includes('architect') ||
+      prompt.toLowerCase().includes('complex') ||
+      prompt.toLowerCase().includes('debug') && prompt.length > 500
+    )) ||
+    (analysis.taskType === 'math' && prompt.toLowerCase().includes('prove')) ||
+    prompt.length > 2000;
+  
+  if (!needsPremiumModel) {
+    // Priority: cheapest and fastest models
     const lightweightPriority = [
-      'gemini-2.5-flash-lite',
-      'gpt-5-nano',
-      'claude-haiku-4-5',
-      'gemini-2.5-flash',
-      'gpt-5-mini',
-      'claude-haiku-3-5'
+      'gemini-2.5-flash-lite',  // $0.10 input
+      'gpt-5-nano',             // $0.15 input
+      'gemini-2.5-flash',       // $0.30 input
+      'gpt-5-mini',             // $0.50 input
+      'claude-haiku-4-5'        // $1.00 input
     ];
     
     for (const modelId of lightweightPriority) {
@@ -258,7 +251,7 @@ export function selectOptimalModel(
         return {
           primary: model,
           fallback: fallback || null,
-          reasoning: `Simple task detected. Using lightweight ${model.displayName} for speed and cost efficiency`
+          reasoning: `Standard task. Using cost-efficient ${model.displayName} (${MODEL_PRICING[model.model].input}¢ per 1K input tokens)`
         };
       }
     }
@@ -282,15 +275,15 @@ export function selectOptimalModel(
     }
   }
   
-  // STEP 4: Task-specific model selection
+  // STEP 4: Task-specific model selection (for premium tasks only)
   switch (analysis.taskType) {
     case 'coding':
-      // Claude Sonnet 4.5 > Gemini 2.5 Pro > Claude Sonnet 4 > others
+      // Complex coding: Claude Sonnet 4.5 > Gemini 2.5 Pro
+      // Simple coding: already handled by lightweight models above
       const codingPriority = [
-        'claude-sonnet-4-5',
-        'gemini-2.5-pro',
-        'claude-sonnet-4',
-        'claude-haiku-4-5',
+        'claude-sonnet-4-5',  // Best coding (77.2% SWE-bench)
+        'gemini-2.5-pro',     // Good coding + cheaper
+        'claude-haiku-4-5',   // Fast coding
         'gpt-5',
         'gemini-2.5-flash'
       ];
@@ -303,30 +296,30 @@ export function selectOptimalModel(
           return {
             primary: model,
             fallback: fallback || null,
-            reasoning: `Coding task detected. ${model.displayName} has best coding performance (${model.model === 'claude-sonnet-4-5' ? '77.2% SWE-bench' : 'optimized for code'})`
+            reasoning: `Complex coding task. ${model.displayName} has superior coding capabilities (${model.model === 'claude-sonnet-4-5' ? '77.2% SWE-bench' : 'optimized for complex code'})`
           };
         }
       }
       break;
       
     case 'math':
-      // Gemini 2.5 Pro > Claude Opus > GPT-5
-      const mathPriority = ['gemini-2.5-pro', 'claude-opus-4-1', 'claude-opus-4', 'gpt-5'];
+      // Gemini 2.5 Pro (86.7% AIME) > Claude Opus > GPT-5
+      const mathPriority = ['gemini-2.5-pro', 'claude-opus-4-1', 'gpt-5'];
       for (const modelId of mathPriority) {
         const model = availableModels.find(m => m.model === modelId);
         if (model) {
           return {
             primary: model,
             fallback: availableModels.find(m => m.model !== modelId && m.strengths.includes('math')) || null,
-            reasoning: `Mathematical reasoning task. ${model.displayName} excels at math (${model.model === 'gemini-2.5-pro' ? '86.7% AIME' : 'strong reasoning'})`
+            reasoning: `Advanced mathematical reasoning. ${model.displayName} excels at complex math (${model.model === 'gemini-2.5-pro' ? '86.7% AIME' : 'strong reasoning'})`
           };
         }
       }
       break;
       
     case 'creative':
-      // Claude models > GPT-5 > Gemini
-      const creativePriority = ['claude-opus-4-1', 'claude-sonnet-4-5', 'gpt-5', 'claude-sonnet-4'];
+      // Claude models excel at creative writing
+      const creativePriority = ['claude-opus-4-1', 'claude-sonnet-4-5', 'gpt-5'];
       for (const modelId of creativePriority) {
         const model = availableModels.find(m => m.model === modelId);
         if (model) {
@@ -340,30 +333,30 @@ export function selectOptimalModel(
       break;
       
     case 'conversation':
-      // GPT-5 > Claude Sonnet > Gemini Flash
-      const conversationPriority = ['gpt-5', 'claude-sonnet-4-5', 'claude-sonnet-4', 'gemini-2.5-flash'];
+      // GPT-5 for natural conversation
+      const conversationPriority = ['gpt-5', 'claude-sonnet-4-5', 'gemini-2.5-flash'];
       for (const modelId of conversationPriority) {
         const model = availableModels.find(m => m.model === modelId);
         if (model) {
           return {
             primary: model,
             fallback: availableModels.find(m => m.model !== modelId) || null,
-            reasoning: `Conversational task. ${model.displayName} provides most natural dialogue`
+            reasoning: `Conversational task. ${model.displayName} provides natural, engaging dialogue`
           };
         }
       }
       break;
       
     case 'analysis':
-      // Gemini 2.5 Pro > Claude Opus > GPT-5
-      const analysisPriority = ['gemini-2.5-pro', 'claude-opus-4-1', 'claude-opus-4', 'gpt-5', 'claude-sonnet-4-5'];
+      // Deep analysis tasks
+      const analysisPriority = ['gemini-2.5-pro', 'claude-opus-4-1', 'gpt-5', 'claude-sonnet-4-5'];
       for (const modelId of analysisPriority) {
         const model = availableModels.find(m => m.model === modelId);
         if (model) {
           return {
             primary: model,
             fallback: availableModels.find(m => m.costTier !== 'ultra-low' && m.model !== modelId) || null,
-            reasoning: `Analysis task. ${model.displayName} provides deep analytical capabilities`
+            reasoning: `Complex analysis task. ${model.displayName} provides deep analytical capabilities`
           };
         }
       }
@@ -374,7 +367,6 @@ export function selectOptimalModel(
   if (analysis.requiresDeepReasoning) {
     const reasoningPriority = [
       'claude-opus-4-1',
-      'claude-opus-4',
       'claude-sonnet-4-5',
       'gemini-2.5-pro',
       'gpt-5'
@@ -384,8 +376,8 @@ export function selectOptimalModel(
       if (model) {
         return {
           primary: model,
-          fallback: availableModels.find(m => m.costTier === 'medium' || m.costTier === 'high') || null,
-          reasoning: `Complex reasoning required. ${model.displayName} provides extended thinking capabilities`
+          fallback: availableModels.find(m => m.costTier === 'medium' || m.costTier === 'premium') || null,
+          reasoning: `Deep reasoning required. ${model.displayName} provides extended thinking capabilities`
         };
       }
     }
@@ -393,7 +385,7 @@ export function selectOptimalModel(
   
   // STEP 6: Multimodal requirements
   if (analysis.requiresMultimodal) {
-    const multimodalPriority = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gpt-5', 'gpt-4o'];
+    const multimodalPriority = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gpt-5'];
     for (const modelId of multimodalPriority) {
       const model = availableModels.find(m => m.model === modelId);
       if (model) {
@@ -406,13 +398,15 @@ export function selectOptimalModel(
     }
   }
   
-  // STEP 7: Default fallback - balanced general-purpose model
+  // STEP 7: Default fallback - prioritize lightweight models
   const defaultPriority = [
-    'gemini-2.5-flash',  // Best price/performance
-    'gpt-5-mini',        // Good balance
-    'claude-sonnet-4',   // Reliable workhorse
-    'gpt-5',             // General purpose
-    'gemini-2.5-pro'     // Powerful but pricier
+    'gemini-2.5-flash',      // Best price/performance ($0.30)
+    'gpt-5-mini',            // Good balance ($0.50)
+    'gemini-2.5-flash-lite', // Ultra cheap ($0.10)
+    'gpt-5-nano',            // Fast ($0.15)
+    'claude-haiku-4-5',      // Fast Claude ($1.00)
+    'gpt-5',                 // General purpose ($2.00)
+    'gemini-2.5-pro'         // Powerful ($1.25)
   ];
   
   for (const modelId of defaultPriority) {
@@ -422,7 +416,7 @@ export function selectOptimalModel(
       return {
         primary: model,
         fallback: fallback || null,
-        reasoning: `General-purpose task. ${model.displayName} provides balanced performance and cost`
+        reasoning: `General task. ${model.displayName} provides best value (${MODEL_PRICING[model.model].input}¢ per 1K tokens)`
       };
     }
   }
@@ -447,4 +441,48 @@ export function getProviderStatus(availableProviders: AvailableProviders): strin
   if (available.length === 0) return 'No providers configured';
   if (available.length === 3) return 'All providers available';
   return `Available: ${available.join(', ')}`;
+}
+
+/**
+ * Estimate the cost for a prompt based on token counts
+ */
+export function estimateCost(
+  model: ModelOption,
+  inputTokens: number,
+  estimatedOutputTokens: number = 500
+): { inputCost: number; outputCost: number; totalCost: number; displayText: string } {
+  const pricing = MODEL_PRICING[model.model];
+  
+  if (!pricing) {
+    return {
+      inputCost: 0,
+      outputCost: 0,
+      totalCost: 0,
+      displayText: 'Cost estimate unavailable'
+    };
+  }
+  
+  // Calculate costs (pricing is per 1M tokens, so divide by 1,000,000)
+  const inputCost = (inputTokens / 1000000) * pricing.input;
+  const outputCost = (estimatedOutputTokens / 1000000) * pricing.output;
+  const totalCost = inputCost + outputCost;
+  
+  // Format for display
+  let displayText: string;
+  if (totalCost < 0.001) {
+    displayText = `< $0.001`;
+  } else if (totalCost < 0.01) {
+    displayText = `~$${totalCost.toFixed(4)}`;
+  } else if (totalCost < 1) {
+    displayText = `~$${totalCost.toFixed(3)}`;
+  } else {
+    displayText = `~$${totalCost.toFixed(2)}`;
+  }
+  
+  return {
+    inputCost,
+    outputCost,
+    totalCost,
+    displayText
+  };
 }

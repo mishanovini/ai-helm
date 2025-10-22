@@ -4,11 +4,16 @@ import {
   analyzeSentiment,
   analyzeStyle,
   analyzeSecurityRisk,
-  selectModel,
   optimizePrompt,
   tuneParameters,
   generateResponse
 } from "./gemini-analysis";
+import {
+  selectOptimalModel,
+  estimateCost,
+  AvailableProviders,
+  ModelOption
+} from "../shared/model-selection";
 
 export interface APIKeys {
   gemini: string;
@@ -120,18 +125,42 @@ export async function runAnalysisJob(
       }
     })();
     
-    // Model Selection (depends on intent)
+    // Model Selection (intelligent decision tree)
     promises.model = (async () => {
       sendUpdate("model", "processing");
       try {
-        const intent = await promises.intent;
-        const result = await selectModel(intent, message.length, useDeepResearch, apiKeys.gemini);
-        results.selectedModel = result.model;
+        // Determine which providers are available
+        const availableProviders: AvailableProviders = {
+          gemini: !!apiKeys.gemini,
+          openai: !!apiKeys.openai,
+          anthropic: !!apiKeys.anthropic
+        };
+        
+        // Use intelligent model selection
+        const selection = selectOptimalModel(message, availableProviders);
+        results.selectedModel = selection.primary;
+        results.modelReasoning = selection.reasoning;
+        results.fallbackModel = selection.fallback;
+        
+        // Estimate cost (assuming ~500 token response)
+        const estimatedInputTokens = Math.ceil(message.length / 4);
+        const costEstimate = estimateCost(selection.primary, estimatedInputTokens, 500);
+        results.estimatedCost = costEstimate;
+        
         sendUpdate("model", "completed", { 
-          selectedModel: result.model,
-          modelProvider: "Gemini"
+          selectedModel: selection.primary.model,
+          modelDisplayName: selection.primary.displayName,
+          modelProvider: selection.primary.provider,
+          reasoning: selection.reasoning,
+          fallbackModel: selection.fallback?.displayName || null,
+          estimatedCost: costEstimate.displayText,
+          costBreakdown: {
+            input: estimatedInputTokens,
+            output: 500,
+            total: costEstimate.displayText
+          }
         });
-        return result.model;
+        return selection.primary;
       } catch (error: any) {
         sendUpdate("model", "error", undefined, error.message);
         hasError = true;
@@ -185,7 +214,7 @@ export async function runAnalysisJob(
     sendUpdate("parameters", "processing");
     let parametersResult: any;
     try {
-      const [model, optimizedPrompt] = await Promise.all([
+      const [modelOption, optimizedPrompt] = await Promise.all([
         promises.model,
         promises.prompt
       ]);
@@ -193,7 +222,7 @@ export async function runAnalysisJob(
       parametersResult = await tuneParameters(
         results.intent,
         results.sentiment,
-        model,
+        modelOption.model,
         optimizedPrompt,
         apiKeys.gemini
       );
@@ -209,14 +238,15 @@ export async function runAnalysisJob(
       // Send a log entry to indicate we're prompting the model
       sendUpdate("generating", "processing");
       try {
+        const selectedModel: ModelOption = results.selectedModel;
         const aiResponse = await generateResponse(
           results.optimizedPrompt,
-          results.selectedModel,
+          selectedModel.model,
           results.parameters,
           apiKeys.gemini
         );
         sendUpdate("generating", "completed", { 
-          message: `Response generated using ${results.selectedModel}` 
+          message: `Response generated using ${selectedModel.displayName} (${results.estimatedCost.displayText})` 
         });
         sendUpdate("response", "completed", { response: aiResponse });
       } catch (error: any) {
