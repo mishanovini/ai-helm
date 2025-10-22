@@ -444,6 +444,27 @@ export function getProviderStatus(availableProviders: AvailableProviders): strin
 }
 
 /**
+ * Select the cheapest available model for lightweight analysis tasks
+ * Priority: Gemini Flash-Lite > GPT-5 Nano > Gemini Flash > Claude Haiku
+ */
+export function selectCheapestModel(providers: AvailableProviders): ModelOption | null {
+  const available = MODEL_CATALOG.filter(m => providers[m.provider]);
+  
+  if (available.length === 0) {
+    return null;
+  }
+  
+  // Sort by input pricing (cheapest first)
+  available.sort((a, b) => {
+    const priceA = MODEL_PRICING[a.model]?.input || Infinity;
+    const priceB = MODEL_PRICING[b.model]?.input || Infinity;
+    return priceA - priceB;
+  });
+  
+  return available[0];
+}
+
+/**
  * Estimate the cost for a prompt based on token counts
  */
 export function estimateCost(

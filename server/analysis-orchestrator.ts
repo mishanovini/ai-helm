@@ -6,9 +6,10 @@ import {
   analyzeSecurityRisk,
   optimizePrompt,
   tuneParameters
-} from "./gemini-analysis";
+} from "./universal-analysis";
 import {
   selectOptimalModel,
+  selectCheapestModel,
   estimateCost,
   AvailableProviders,
   ModelOption
@@ -55,21 +56,30 @@ export async function runAnalysisJob(
   };
 
   try {
-    // Check if Gemini is available for analysis phases
-    const hasGemini = !!apiKeys.gemini;
+    // Determine available providers and select cheapest model for analysis
+    const providers: AvailableProviders = {
+      gemini: !!apiKeys.gemini,
+      openai: !!apiKeys.openai,
+      anthropic: !!apiKeys.anthropic
+    };
+    
+    const analysisModel = selectCheapestModel(providers);
+    
+    if (!analysisModel) {
+      sendUpdate("complete", "error", undefined, "No API keys available");
+      return;
+    }
+    
+    // Get the correct API key for the analysis model
+    const analysisApiKey = apiKeys[analysisModel.provider] || '';
     
     // Phase 1: Run independent analyses in parallel with promise-based dependencies
     
-    // Intent (independent) - Gemini only
+    // Intent (independent) - Uses cheapest available model
     promises.intent = (async () => {
-      if (!hasGemini) {
-        results.intent = "general";
-        sendUpdate("intent", "completed", { intent: "general" });
-        return "general";
-      }
       sendUpdate("intent", "processing");
       try {
-        const result = await analyzeIntent(message, apiKeys.gemini);
+        const result = await analyzeIntent(message, analysisModel, analysisApiKey);
         results.intent = result.intent;
         sendUpdate("intent", "completed", { intent: result.intent });
         return result.intent;
@@ -80,20 +90,11 @@ export async function runAnalysisJob(
       }
     })();
     
-    // Sentiment (independent) - Gemini only
+    // Sentiment (independent) - Uses cheapest available model
     promises.sentiment = (async () => {
-      if (!hasGemini) {
-        results.sentiment = "neutral";
-        results.sentimentDetail = "Not analyzed";
-        sendUpdate("sentiment", "completed", { 
-          sentiment: "neutral", 
-          sentimentDetail: "Not analyzed" 
-        });
-        return { sentiment: "neutral", detail: "Not analyzed" };
-      }
       sendUpdate("sentiment", "processing");
       try {
-        const result = await analyzeSentiment(message, apiKeys.gemini);
+        const result = await analyzeSentiment(message, analysisModel, analysisApiKey);
         results.sentiment = result.sentiment;
         results.sentimentDetail = result.detail;
         sendUpdate("sentiment", "completed", { 
@@ -109,16 +110,11 @@ export async function runAnalysisJob(
       }
     })();
     
-    // Style (independent) - Gemini only
+    // Style (independent) - Uses cheapest available model
     promises.style = (async () => {
-      if (!hasGemini) {
-        results.style = "neutral";
-        sendUpdate("style", "completed", { style: "neutral" });
-        return "neutral";
-      }
       sendUpdate("style", "processing");
       try {
-        const result = await analyzeStyle(message, apiKeys.gemini);
+        const result = await analyzeStyle(message, analysisModel, analysisApiKey);
         results.style = result.style;
         sendUpdate("style", "completed", { style: result.style });
         return result.style;
@@ -129,20 +125,11 @@ export async function runAnalysisJob(
       }
     })();
     
-    // Security (independent) - Gemini only
+    // Security (independent) - Uses cheapest available model
     promises.security = (async () => {
-      if (!hasGemini) {
-        results.securityScore = 5;
-        results.securityExplanation = "Not analyzed";
-        sendUpdate("security", "completed", { 
-          securityScore: 5,
-          securityExplanation: "Not analyzed"
-        });
-        return { score: 5, explanation: "Not analyzed" };
-      }
       sendUpdate("security", "processing");
       try {
-        const result = await analyzeSecurityRisk(message, apiKeys.gemini);
+        const result = await analyzeSecurityRisk(message, analysisModel, analysisApiKey);
         results.securityScore = result.score;
         results.securityExplanation = result.explanation;
         sendUpdate("security", "completed", { 
@@ -201,13 +188,8 @@ export async function runAnalysisJob(
       }
     })();
     
-    // Prompt Optimization (depends on intent, sentiment, style) - Gemini only
+    // Prompt Optimization (depends on intent, sentiment, style) - Uses cheapest available model
     promises.prompt = (async () => {
-      if (!hasGemini) {
-        results.optimizedPrompt = message; // Use original message
-        sendUpdate("prompt", "completed", { optimizedPrompt: message });
-        return message;
-      }
       sendUpdate("prompt", "processing");
       try {
         const [intent, sentimentResult, style] = await Promise.all([
@@ -220,7 +202,8 @@ export async function runAnalysisJob(
           intent,
           sentimentResult.sentiment,
           style,
-          apiKeys.gemini
+          analysisModel,
+          analysisApiKey
         );
         results.optimizedPrompt = result.optimizedPrompt;
         sendUpdate("prompt", "completed", { optimizedPrompt: result.optimizedPrompt });
@@ -248,42 +231,32 @@ export async function runAnalysisJob(
       return;
     }
 
-    // Phase 2: Parameter tuning (depends on model and optimized prompt) - Gemini only
-    let parametersResult: any;
-    if (hasGemini) {
-      sendUpdate("parameters", "processing");
-      try {
-        const [modelOption, optimizedPrompt] = await Promise.all([
-          promises.model,
-          promises.prompt
-        ]);
-        
-        parametersResult = await tuneParameters(
-          results.intent,
-          results.sentiment,
-          modelOption.model,
-          optimizedPrompt,
-          apiKeys.gemini
-        );
-        results.parameters = parametersResult;
-        sendUpdate("parameters", "completed", { parameters: parametersResult });
-      } catch (error: any) {
-        sendUpdate("parameters", "error", undefined, error.message);
-        // Use default parameters as fallback
-        results.parameters = {
-          temperature: 0.7,
-          top_p: 1.0,
-          max_tokens: 1000
-        };
-      }
-    } else {
-      // Use default parameters when Gemini isn't available
+    // Phase 2: Parameter tuning (depends on model and optimized prompt) - Uses cheapest available model
+    sendUpdate("parameters", "processing");
+    try {
+      const [modelOption, optimizedPrompt] = await Promise.all([
+        promises.model,
+        promises.prompt
+      ]);
+      
+      const parametersResult = await tuneParameters(
+        results.intent,
+        results.sentiment,
+        modelOption.model,
+        optimizedPrompt,
+        analysisModel,
+        analysisApiKey
+      );
+      results.parameters = parametersResult;
+      sendUpdate("parameters", "completed", { parameters: parametersResult });
+    } catch (error: any) {
+      sendUpdate("parameters", "error", undefined, error.message);
+      // Use default parameters as fallback
       results.parameters = {
         temperature: 0.7,
         top_p: 1.0,
         max_tokens: 1000
       };
-      sendUpdate("parameters", "completed", { parameters: results.parameters });
     }
 
     // Phase 3: Generate actual AI response using selected model
