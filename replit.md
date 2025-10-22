@@ -69,6 +69,7 @@ Preferred communication style: Simple, everyday language.
   - Prompt optimization (rewrites for better results)
   - Parameter tuning (temperature, top_p, max_tokens)
 - All analysis functions accept `apiKey` parameter for dynamic client creation
+- **Provider-Specific Constraints**: Claude/Anthropic models reject requests with both `temperature` and `top_p` parameters - only `temperature` is sent to Anthropic API
 
 **Intelligent Model Selection (`shared/model-selection.ts`)**
 - Automated decision tree selects optimal AI model for final response generation

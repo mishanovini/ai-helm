@@ -114,6 +114,9 @@ async function generateOpenAIResponse(
 
 /**
  * Generate response using Anthropic
+ * 
+ * Note: Claude models (especially newer ones like Opus 4.1 and Sonnet 4.5) do NOT allow
+ * both temperature and top_p to be specified simultaneously. We only send temperature.
  */
 async function generateAnthropicResponse(
   prompt: string,
@@ -130,11 +133,12 @@ async function generateAnthropicResponse(
     { role: 'user' as const, content: prompt }
   ];
   
+  // Claude models reject requests with both temperature and top_p set
+  // Only send temperature (recommended by Anthropic)
   const response = await anthropic.messages.create({
     model: model,
     max_tokens: parameters.max_tokens,
     temperature: parameters.temperature,
-    top_p: parameters.top_p,
     messages
   });
 
