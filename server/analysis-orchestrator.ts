@@ -5,7 +5,8 @@ import {
   analyzeStyle,
   analyzeSecurityRisk,
   optimizePrompt,
-  tuneParameters
+  tuneParameters,
+  validateResponse
 } from "./universal-analysis";
 import {
   selectOptimalModel,
@@ -272,12 +273,13 @@ export async function runAnalysisJob(
     }
 
     // Phase 3: Generate actual AI response using selected model
+    let aiResponse = "";
     if (!hasError) {
       // Send a log entry to indicate we're prompting the model
       sendUpdate("generating", "processing");
       try {
         const selectedModel: ModelOption = results.selectedModel;
-        const aiResponse = await generateResponse(
+        aiResponse = await generateResponse(
           results.optimizedPrompt,
           conversationHistory,
           selectedModel.provider,
@@ -296,8 +298,33 @@ export async function runAnalysisJob(
       }
     }
 
-    // Send completion signal
-    if (hasError) {
+    // Phase 4: Validate the AI response against user's intent
+    if (!hasError && aiResponse) {
+      sendUpdate("validating", "processing");
+      try {
+        const validation = await validateResponse(
+          message,
+          results.intent,
+          aiResponse,
+          analysisModel,
+          analysisApiKey
+        );
+        sendUpdate("validating", "completed", {
+          userSummary: validation.userSummary,
+          validation: validation.validation
+        });
+        
+        // Send completion signal with validation details
+        sendUpdate("complete", "completed", {
+          userSummary: validation.userSummary,
+          validation: validation.validation
+        });
+      } catch (error: any) {
+        // If validation fails, still complete but without validation details
+        sendUpdate("validating", "error", undefined, error.message);
+        sendUpdate("complete", "completed");
+      }
+    } else if (hasError) {
       sendUpdate("complete", "error", undefined, "Analysis completed with errors");
     } else {
       sendUpdate("complete", "completed");

@@ -12,6 +12,11 @@ interface AnalysisResult {
   [key: string]: any;
 }
 
+export interface ResponseValidation {
+  userSummary: string;
+  validation: string;
+}
+
 /**
  * Generic analysis function that works with any provider
  */
@@ -255,5 +260,43 @@ MAX_TOKENS: [500-16000]`;
     temperature: Math.min(Math.max(temperature, 0), 1),
     top_p: Math.min(Math.max(top_p, 0), 1),
     max_tokens: Math.min(Math.max(max_tokens, 500), 16000)
+  };
+}
+
+/**
+ * Validate that the AI response properly addresses the user's intent
+ * Returns a summary of what the user wanted and how the response satisfies it
+ */
+export async function validateResponse(
+  userMessage: string,
+  userIntent: string,
+  aiResponse: string,
+  analysisModel: ModelOption,
+  apiKey: string
+): Promise<ResponseValidation> {
+  const systemPrompt = `You are validating an AI response to ensure it properly addresses the user's request.`;
+  
+  const userPrompt = `User's original message: "${userMessage}"
+Detected user intent: ${userIntent}
+
+AI's response: "${aiResponse}"
+
+Please provide:
+1. A brief 1-sentence summary of what the user was looking for
+2. A brief 1-sentence validation of how the AI response satisfies that need (or if it falls short)
+
+Format your response as:
+USER SEEKING: [one sentence summary]
+VALIDATION: [one sentence assessment]`;
+
+  const response = await runAnalysis(analysisModel, apiKey, systemPrompt, userPrompt);
+  
+  // Parse the response
+  const userSeekingMatch = response.match(/USER SEEKING:\s*(.+?)(?:\n|$)/i);
+  const validationMatch = response.match(/VALIDATION:\s*(.+?)(?:\n|$)/i);
+  
+  return {
+    userSummary: userSeekingMatch?.[1]?.trim() || "Understanding of the topic",
+    validation: validationMatch?.[1]?.trim() || "Response addresses the user's request"
   };
 }

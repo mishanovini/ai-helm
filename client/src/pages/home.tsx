@@ -159,8 +159,20 @@ export default function Home() {
         content: payload.response,
         timestamp
       }]);
+    } else if (phase === "validating" && status === "processing") {
+      addLog("Validating response quality...", "processing");
+    } else if (phase === "validating" && status === "completed") {
+      setLogs(prev => prev.filter(log => log.message !== "Validating response quality..."));
+      if (payload.userSummary && payload.validation) {
+        addLog(`User seeking: ${payload.userSummary}`, "info");
+        addLog(`Validation: ${payload.validation}`, "success");
+      }
     } else if (phase === "complete" && status === "completed") {
-      addLog("✓ Pipeline complete - All analysis phases finished and response delivered successfully", "success");
+      if (payload?.userSummary && payload?.validation) {
+        addLog(`✓ Pipeline complete - ${payload.validation}`, "success");
+      } else {
+        addLog("✓ Pipeline complete - All analysis phases finished and response delivered successfully", "success");
+      }
       setIsProcessing(false);
     } else if (status === "error") {
       addLog(`Error in ${phase}: ${error || "Unknown error"}`, "error");
