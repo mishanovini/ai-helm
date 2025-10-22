@@ -22,9 +22,15 @@ export interface APIKeys {
   anthropic?: string;
 }
 
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface AnalysisJob {
   jobId: string;
   message: string;
+  conversationHistory: ConversationMessage[];
   useDeepResearch: boolean;
   apiKeys: APIKeys;
 }
@@ -41,7 +47,7 @@ export async function runAnalysisJob(
   job: AnalysisJob,
   ws: WebSocket
 ): Promise<void> {
-  const { jobId, message, useDeepResearch, apiKeys } = job;
+  const { jobId, message, conversationHistory, useDeepResearch, apiKeys } = job;
 
   // Store results and promises for dependent analyses
   const results: any = {};
@@ -156,14 +162,19 @@ export async function runAnalysisJob(
           anthropic: !!apiKeys.anthropic
         };
         
-        // Use intelligent model selection
-        const selection = selectOptimalModel(message, availableProviders);
+        // Build full context for model selection (includes conversation history + current message)
+        const fullContext = conversationHistory.length > 0
+          ? `${conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\nuser: ${message}`
+          : message;
+        
+        // Use intelligent model selection with full conversation context
+        const selection = selectOptimalModel(fullContext, availableProviders);
         results.selectedModel = selection.primary;
         results.modelReasoning = selection.reasoning;
         results.fallbackModel = selection.fallback;
         
-        // Estimate cost (assuming ~500 token response)
-        const estimatedInputTokens = Math.ceil(message.length / 4);
+        // Estimate cost based on full conversation context
+        const estimatedInputTokens = Math.ceil(fullContext.length / 4);
         const costEstimate = estimateCost(selection.primary, estimatedInputTokens, 500);
         results.estimatedCost = costEstimate;
         
@@ -199,6 +210,7 @@ export async function runAnalysisJob(
         ]);
         const result = await optimizePrompt(
           message,
+          conversationHistory,
           intent,
           sentimentResult.sentiment,
           style,
@@ -267,6 +279,7 @@ export async function runAnalysisJob(
         const selectedModel: ModelOption = results.selectedModel;
         const aiResponse = await generateResponse(
           results.optimizedPrompt,
+          conversationHistory,
           selectedModel.provider,
           selectedModel.model,
           results.parameters,

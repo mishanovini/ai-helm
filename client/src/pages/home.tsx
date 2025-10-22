@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Header from "@/components/Header";
 import ChatMessage from "@/components/ChatMessage";
 import ChatInput from "@/components/ChatInput";
@@ -30,6 +30,7 @@ export default function Home() {
   const [pendingMessage, setPendingMessage] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasAPIKeys, setHasAPIKeys] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Check for API keys on mount, route change, and window focus
   useEffect(() => {
@@ -56,6 +57,11 @@ export default function Home() {
       window.removeEventListener('visibilitychange', checkKeys);
     };
   }, []);
+
+  // Auto-scroll to bottom when new messages are added
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const addLog = (message: string, type: LogEntry["type"]) => {
     const timestamp = new Date().toLocaleTimeString('en-US', { 
@@ -179,10 +185,12 @@ export default function Home() {
       return;
     }
 
+    // Send conversation history along with the current message
     const sent = sendMessage({
       type: "analyze",
       payload: {
         message: userMessage,
+        conversationHistory: messages, // Include full conversation context
         useDeepResearch,
         apiKeys: apiKeys // Send API keys with the request
       }
@@ -287,6 +295,7 @@ export default function Home() {
                           />
                         ))
                       )}
+                      <div ref={messagesEndRef} />
                     </div>
                   </ScrollArea>
                   <div className="mt-4">

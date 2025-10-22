@@ -173,24 +173,30 @@ EXPLANATION: [brief explanation]`;
  */
 export async function optimizePrompt(
   message: string,
+  conversationHistory: Array<{role: string; content: string}>,
   intent: string,
   sentiment: string,
   style: string,
   model: ModelOption,
   apiKey: string
 ): Promise<{ optimizedPrompt: string }> {
-  const systemPrompt = `You are a prompt optimizer. Given a user's message and its analysis, create an improved version that:
-1. Clarifies the intent if needed
-2. Maintains the user's tone and style
-3. Makes the request more specific and actionable
-4. Adds helpful context if the original is vague
+  const systemPrompt = `You are a prompt optimizer. Given a user's message, conversation history, and its analysis, create an improved version that:
+1. Includes relevant conversation context when necessary
+2. Clarifies the intent if needed
+3. Maintains the user's tone and style
+4. Makes the request more specific and actionable
+5. References previous messages if they provide helpful context
 
 Keep improvements subtle - don't completely rewrite unless necessary.
 If the prompt is already clear and well-formed, return it unchanged.
 
 Respond with ONLY the optimized prompt, nothing else.`;
 
-  const userPrompt = `Original message: "${message}"
+  const conversationContext = conversationHistory.length > 0
+    ? `Previous conversation:\n${conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\n\n`
+    : '';
+
+  const userPrompt = `${conversationContext}Current message: "${message}"
 Intent: ${intent}
 Sentiment: ${sentiment}
 Style: ${style}
