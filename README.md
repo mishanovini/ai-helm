@@ -234,6 +234,8 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting and security checklis
 - [ ] Server-side key encryption
 - [ ] Conversation history persistence
 - [ ] Custom model configurations
+- [ ] Customization of model decision tree
+- [ ] Org-wide design allowing central management of multiple users
 - [ ] Batch processing mode
 - [ ] API endpoint for programmatic access
 - [ ] Multi-language support
@@ -241,7 +243,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting and security checklis
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details
+Apache License 2.0 - see [LICENSE](LICENSE) for details
 
 ## Acknowledgments
 

@@ -6,6 +6,8 @@ This is an open-source AI middleware platform that provides real-time analysis a
 
 **Open-Source Distribution Model**: Users provide their own API keys for AI providers (Gemini, OpenAI, Anthropic). Keys are stored locally in the browser and never transmitted to or stored on our servers. This ensures privacy and allows anyone to run the application with their own credentials.
 
+**License**: Apache License 2.0
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.

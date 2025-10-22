@@ -183,7 +183,7 @@ Before submitting code:
 
 ## License
 
-This security policy is part of the AI Helm project and is subject to the same license terms.
+This security policy is part of the AI Helm project and is licensed under the Apache License 2.0.
 
 ## Updates
 
