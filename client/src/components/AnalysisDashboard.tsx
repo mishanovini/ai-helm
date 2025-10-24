@@ -72,27 +72,14 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
         </Card>
       ) : (
         <>
-          {/* Intent and Style - Compact Grid */}
-          <Card className="p-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
-                  Intent
-                </label>
-                <p className="text-sm font-medium mt-1" data-testid="text-intent">
-                  {data.intent || <span className="text-muted-foreground animate-pulse">Analyzing...</span>}
-                </p>
-              </div>
-
-              <div>
-                <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
-                  Style
-                </label>
-                <p className="text-sm font-medium mt-1" data-testid="text-style">
-                  {data.style || <span className="text-muted-foreground animate-pulse">Analyzing...</span>}
-                </p>
-              </div>
-            </div>
+          {/* Intent - Compact */}
+          <Card className="p-3">
+            <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+              Intent
+            </label>
+            <p className="text-sm mt-1" data-testid="text-intent">
+              {data.intent || <span className="text-muted-foreground animate-pulse">Analyzing...</span>}
+            </p>
           </Card>
 
           {/* Selected Model and Parameters - Combined */}
@@ -153,28 +140,41 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
             </div>
           </Card>
 
-          {/* Sentiment & Security - Side by Side */}
+          {/* Sentiment, Style & Security */}
           <Card className="p-4">
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
-                  Sentiment
-                </label>
-                <div className="mt-1">
-                  {data.sentiment ? (
-                    <>
-                      <Badge className={getSentimentColor(data.sentiment)} data-testid="badge-sentiment">
-                        {data.sentiment}
-                      </Badge>
-                      {data.sentimentDetail && (
-                        <p className="text-xs text-muted-foreground mt-2" data-testid="text-sentiment-detail">
-                          {data.sentimentDetail}
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-sm text-muted-foreground animate-pulse">Analyzing...</span>
-                  )}
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                    Sentiment
+                  </label>
+                  <div className="mt-1">
+                    {data.sentiment ? (
+                      <>
+                        <Badge className={getSentimentColor(data.sentiment)} data-testid="badge-sentiment">
+                          {data.sentiment}
+                        </Badge>
+                        {data.sentimentDetail && (
+                          <p className="text-xs text-muted-foreground mt-2" data-testid="text-sentiment-detail">
+                            {data.sentimentDetail}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-sm text-muted-foreground animate-pulse">Analyzing...</span>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                    Style
+                  </label>
+                  <div className="mt-1">
+                    <Badge variant="outline" data-testid="badge-style">
+                      {data.style || <span className="text-muted-foreground animate-pulse">Analyzing...</span>}
+                    </Badge>
+                  </div>
                 </div>
               </div>
 
