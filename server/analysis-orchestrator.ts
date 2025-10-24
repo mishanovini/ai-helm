@@ -132,11 +132,13 @@ export async function runAnalysisJob(
       }
     })();
     
-    // Security (independent) - Uses cheapest available model
+    // Security (depends on intent) - Uses cheapest available model
     promises.security = (async () => {
       sendUpdate("security", "processing");
       try {
-        const result = await analyzeSecurityRisk(message, analysisModel, analysisApiKey);
+        // Wait for intent to complete first
+        const intent = await promises.intent;
+        const result = await analyzeSecurityRisk(message, intent, analysisModel, analysisApiKey);
         results.securityScore = result.score;
         results.securityExplanation = result.explanation;
         sendUpdate("security", "completed", { 
