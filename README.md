@@ -28,7 +28,7 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/ai-helm.git
+git clone https://github.com/mishanovini/ai-helm.git
 cd ai-helm
 
 # Install dependencies
@@ -254,8 +254,8 @@ Apache License 2.0 - see [LICENSE](LICENSE) for details
 ## Support
 
 - 📖 [Documentation](SECURITY.md)
-- 🐛 [Issue Tracker](https://github.com/yourusername/ai-helm/issues)
-- 💬 [Discussions](https://github.com/yourusername/ai-helm/discussions)
+- 🐛 [Issue Tracker](https://github.com/mishanovini/ai-helm/issues)
+- 💬 [Discussions](https://github.com/mishanovini/ai-helm/discussions)
 
 ---
 

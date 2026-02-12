@@ -1,9 +1,6 @@
 import { WebSocket } from "ws";
+import { runConsolidatedAnalysis } from "./consolidated-analysis";
 import {
-  analyzeIntent,
-  analyzeSentiment,
-  analyzeStyle,
-  analyzeSecurityRisk,
   optimizePrompt,
   tuneParameters,
   validateResponse
@@ -15,18 +12,12 @@ import {
   AvailableProviders,
   ModelOption
 } from "../shared/model-selection";
-import { generateResponse } from "./response-generator";
+import { evaluateRules } from "./dynamic-router";
+import { generateResponse, generateResponseStream } from "./response-generator";
+import { storage } from "./storage";
+import type { APIKeys, ConversationMessage, AnalysisUpdate, ConsolidatedAnalysisResult } from "../shared/types";
 
-export interface APIKeys {
-  gemini: string;
-  openai?: string;
-  anthropic?: string;
-}
-
-export interface ConversationMessage {
-  role: "user" | "assistant";
-  content: string;
-}
+export type { APIKeys, ConversationMessage, AnalysisUpdate };
 
 export interface AnalysisJob {
   jobId: string;
@@ -34,15 +25,14 @@ export interface AnalysisJob {
   conversationHistory: ConversationMessage[];
   useDeepResearch: boolean;
   apiKeys: APIKeys;
+  userId?: string | null;
+  orgId?: string | null;
+  conversationId?: string | null;
+  signal?: AbortSignal;
 }
 
-export interface AnalysisUpdate {
-  jobId: string;
-  phase: string;
-  status: "pending" | "processing" | "completed" | "error";
-  payload?: any;
-  error?: string;
-}
+// Default security threshold if org settings not available
+const DEFAULT_SECURITY_THRESHOLD = 8;
 
 export async function runAnalysisJob(
   job: AnalysisJob,
@@ -50,10 +40,9 @@ export async function runAnalysisJob(
 ): Promise<void> {
   const { jobId, message, conversationHistory, useDeepResearch, apiKeys } = job;
 
-  // Store results and promises for dependent analyses
   const results: any = {};
-  const promises: any = {};
   let hasError = false;
+  const startTime = Date.now();
 
   const sendUpdate = (phase: string, status: AnalysisUpdate["status"], payload?: any, error?: string) => {
     const update: AnalysisUpdate = { jobId, phase, status, payload, error };
@@ -69,196 +58,217 @@ export async function runAnalysisJob(
       openai: !!apiKeys.openai,
       anthropic: !!apiKeys.anthropic
     };
-    
+
     const analysisModel = selectCheapestModel(providers);
-    
+
     if (!analysisModel) {
       sendUpdate("complete", "error", undefined, "No API keys available");
       return;
     }
-    
-    // Get the correct API key for the analysis model
+
     const analysisApiKey = apiKeys[analysisModel.provider] || '';
-    
-    // Phase 1: Run independent analyses in parallel with promise-based dependencies
-    
-    // Intent (independent) - Uses cheapest available model
-    promises.intent = (async () => {
-      sendUpdate("intent", "processing");
+
+    // ========================================================================
+    // Phase 1: Consolidated Analysis (single LLM call replaces 4 separate calls)
+    // ========================================================================
+
+    // Send processing updates for all phases at once
+    sendUpdate("intent", "processing");
+    sendUpdate("sentiment", "processing");
+    sendUpdate("style", "processing");
+    sendUpdate("security", "processing");
+
+    let analysis: ConsolidatedAnalysisResult;
+    try {
+      analysis = await runConsolidatedAnalysis(message, analysisModel, analysisApiKey);
+    } catch (error: any) {
+      sendUpdate("intent", "error", undefined, error.message);
+      sendUpdate("sentiment", "error", undefined, error.message);
+      sendUpdate("style", "error", undefined, error.message);
+      sendUpdate("security", "error", undefined, error.message);
+      sendUpdate("complete", "error", undefined, "Consolidated analysis failed");
+      return;
+    }
+
+    // Emit individual phase completions from the consolidated result (for UI compatibility)
+    results.intent = analysis.intent;
+    sendUpdate("intent", "completed", { intent: analysis.intent });
+
+    results.sentiment = analysis.sentiment;
+    results.sentimentDetail = analysis.sentimentDetail;
+    sendUpdate("sentiment", "completed", {
+      sentiment: analysis.sentiment,
+      sentimentDetail: analysis.sentimentDetail
+    });
+
+    results.style = analysis.style;
+    sendUpdate("style", "completed", { style: analysis.style });
+
+    results.securityScore = analysis.securityScore;
+    results.securityExplanation = analysis.securityExplanation;
+    sendUpdate("security", "completed", {
+      securityScore: analysis.securityScore,
+      securityExplanation: analysis.securityExplanation
+    });
+
+    // Send prompt quality data
+    results.promptQuality = analysis.promptQuality;
+    sendUpdate("promptQuality", "completed", {
+      promptQuality: analysis.promptQuality
+    });
+
+    // Store task type and complexity for model selection and logging
+    results.taskType = analysis.taskType;
+    results.complexity = analysis.complexity;
+
+    // ========================================================================
+    // Security Threshold Halt
+    // ========================================================================
+
+    let securityThreshold = DEFAULT_SECURITY_THRESHOLD;
+    if (job.orgId) {
       try {
-        const result = await analyzeIntent(message, analysisModel, analysisApiKey);
-        results.intent = result.intent;
-        sendUpdate("intent", "completed", { intent: result.intent });
-        return result.intent;
-      } catch (error: any) {
-        sendUpdate("intent", "error", undefined, error.message);
-        results.intent = "general"; // Fallback
-        return "general";
+        const org = await storage.getOrganization(job.orgId);
+        if (org?.settings?.securityThreshold != null) {
+          securityThreshold = org.settings.securityThreshold;
+        }
+      } catch {
+        // Use default threshold on error
       }
-    })();
-    
-    // Sentiment (independent) - Uses cheapest available model
-    promises.sentiment = (async () => {
-      sendUpdate("sentiment", "processing");
-      try {
-        const result = await analyzeSentiment(message, analysisModel, analysisApiKey);
-        results.sentiment = result.sentiment;
-        results.sentimentDetail = result.detail;
-        sendUpdate("sentiment", "completed", { 
-          sentiment: result.sentiment, 
-          sentimentDetail: result.detail 
-        });
-        return { sentiment: result.sentiment, detail: result.detail };
-      } catch (error: any) {
-        sendUpdate("sentiment", "error", undefined, error.message);
-        results.sentiment = "neutral"; // Fallback
-        results.sentimentDetail = "Error during analysis";
-        return { sentiment: "neutral", detail: "Error during analysis" };
+    }
+
+    if (analysis.securityScore >= securityThreshold) {
+      sendUpdate("security_halt", "error", {
+        score: analysis.securityScore,
+        threshold: securityThreshold,
+        explanation: analysis.securityExplanation
+      });
+
+      // Log the halted request
+      if (job.userId) {
+        try {
+          await storage.createAnalysisLog({
+            userId: job.userId,
+            intent: analysis.intent,
+            sentiment: analysis.sentiment,
+            style: analysis.style,
+            securityScore: analysis.securityScore,
+            securityHalted: true,
+            taskType: analysis.taskType,
+            complexity: analysis.complexity,
+            promptQualityScore: analysis.promptQuality.score,
+            promptClarity: analysis.promptQuality.clarity,
+            promptSpecificity: analysis.promptQuality.specificity,
+            promptActionability: analysis.promptQuality.actionability,
+            responseTimeMs: Date.now() - startTime,
+          });
+        } catch {
+          // Non-critical: log failure doesn't block the pipeline
+        }
       }
-    })();
-    
-    // Style (independent) - Uses cheapest available model
-    promises.style = (async () => {
-      sendUpdate("style", "processing");
-      try {
-        const result = await analyzeStyle(message, analysisModel, analysisApiKey);
-        results.style = result.style;
-        sendUpdate("style", "completed", { style: result.style });
-        return result.style;
-      } catch (error: any) {
-        sendUpdate("style", "error", undefined, error.message);
-        results.style = "neutral"; // Fallback
-        return "neutral";
-      }
-    })();
-    
-    // Security (depends on intent) - Uses cheapest available model
-    promises.security = (async () => {
-      sendUpdate("security", "processing");
-      try {
-        // Wait for intent to complete first
-        const intent = await promises.intent;
-        const result = await analyzeSecurityRisk(message, intent, analysisModel, analysisApiKey);
-        results.securityScore = result.score;
-        results.securityExplanation = result.explanation;
-        sendUpdate("security", "completed", { 
-          securityScore: result.score,
-          securityExplanation: result.explanation
-        });
-        return result;
-      } catch (error: any) {
-        sendUpdate("security", "error", undefined, error.message);
-        results.securityScore = 5; // Fallback
-        results.securityExplanation = "Error during analysis";
-        return { score: 5, explanation: "Error during analysis" };
-      }
-    })();
-    
-    // Model Selection (intelligent decision tree)
-    promises.model = (async () => {
-      sendUpdate("model", "processing");
-      try {
-        // Determine which providers are available
-        const availableProviders: AvailableProviders = {
-          gemini: !!apiKeys.gemini,
-          openai: !!apiKeys.openai,
-          anthropic: !!apiKeys.anthropic
-        };
-        
-        // Build full context for model selection (includes conversation history + current message)
-        const fullContext = conversationHistory.length > 0
-          ? `${conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\nuser: ${message}`
-          : message;
-        
-        // Use intelligent model selection with full conversation context
+
+      sendUpdate("complete", "error", undefined,
+        `Request blocked: security score ${analysis.securityScore}/10 exceeds threshold ${securityThreshold}. Contact your admin if you believe this is an error.`
+      );
+      return;
+    }
+
+    // ========================================================================
+    // Phase 2: Model Selection
+    // ========================================================================
+
+    sendUpdate("model", "processing");
+    try {
+      const availableProviders: AvailableProviders = {
+        gemini: !!apiKeys.gemini,
+        openai: !!apiKeys.openai,
+        anthropic: !!apiKeys.anthropic
+      };
+
+      const fullContext = conversationHistory.length > 0
+        ? `${conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\nuser: ${message}`
+        : message;
+
+      // Try dynamic router first, fall back to hardcoded selection
+      const routerResult = await evaluateRules(
+        { message, analysis, availableProviders },
+        job.orgId,
+        job.userId
+      );
+
+      if (routerResult) {
+        results.selectedModel = routerResult.model;
+        results.modelReasoning = routerResult.reasoning;
+        results.fallbackModel = routerResult.fallback;
+        results.routerRuleMatched = routerResult.matchedRuleId;
+      } else {
         const selection = selectOptimalModel(fullContext, availableProviders);
         results.selectedModel = selection.primary;
         results.modelReasoning = selection.reasoning;
         results.fallbackModel = selection.fallback;
-        
-        // Estimate cost based on full conversation context
-        const estimatedInputTokens = Math.ceil(fullContext.length / 4);
-        const costEstimate = estimateCost(selection.primary, estimatedInputTokens, 500);
-        results.estimatedCost = costEstimate;
-        
-        sendUpdate("model", "completed", { 
-          selectedModel: selection.primary.model,
-          modelDisplayName: selection.primary.displayName,
-          modelProvider: selection.primary.provider,
-          reasoning: selection.reasoning,
-          fallbackModel: selection.fallback?.displayName || null,
-          estimatedCost: costEstimate.displayText,
-          costBreakdown: {
-            input: estimatedInputTokens,
-            output: 500,
-            total: costEstimate.displayText
-          }
-        });
-        return selection.primary;
-      } catch (error: any) {
-        sendUpdate("model", "error", undefined, error.message);
-        hasError = true;
-        throw error;
       }
-    })();
-    
-    // Prompt Optimization (depends on intent, sentiment, style) - Uses cheapest available model
-    promises.prompt = (async () => {
-      sendUpdate("prompt", "processing");
-      try {
-        const [intent, sentimentResult, style] = await Promise.all([
-          promises.intent,
-          promises.sentiment,
-          promises.style
-        ]);
-        const result = await optimizePrompt(
-          message,
-          conversationHistory,
-          intent,
-          sentimentResult.sentiment,
-          style,
-          analysisModel,
-          analysisApiKey
-        );
-        results.optimizedPrompt = result.optimizedPrompt;
-        sendUpdate("prompt", "completed", { optimizedPrompt: result.optimizedPrompt });
-        return result.optimizedPrompt;
-      } catch (error: any) {
-        sendUpdate("prompt", "error", undefined, error.message);
-        results.optimizedPrompt = message; // Fallback to original
-        return message;
-      }
-    })();
 
-    // Wait for all parallel analyses to settle
-    await Promise.allSettled([
-      promises.intent,
-      promises.sentiment,
-      promises.style,
-      promises.security,
-      promises.model,
-      promises.prompt
-    ]);
+      const estimatedInputTokens = Math.ceil(fullContext.length / 4);
+      const costEstimate = estimateCost(results.selectedModel, estimatedInputTokens, 500);
+      results.estimatedCost = costEstimate;
 
-    // If any critical error occurred, abort
+      sendUpdate("model", "completed", {
+        selectedModel: results.selectedModel.model,
+        modelDisplayName: results.selectedModel.displayName,
+        modelProvider: results.selectedModel.provider,
+        reasoning: results.modelReasoning,
+        fallbackModel: results.fallbackModel?.displayName || null,
+        estimatedCost: costEstimate.displayText,
+        routerRuleMatched: results.routerRuleMatched || null,
+        costBreakdown: {
+          input: estimatedInputTokens,
+          output: 500,
+          total: costEstimate.displayText
+        }
+      });
+    } catch (error: any) {
+      sendUpdate("model", "error", undefined, error.message);
+      hasError = true;
+    }
+
     if (hasError) {
-      sendUpdate("complete", "error", undefined, "Analysis failed due to upstream errors");
+      sendUpdate("complete", "error", undefined, "Model selection failed");
       return;
     }
 
-    // Phase 2: Parameter tuning (depends on model and optimized prompt) - Uses cheapest available model
+    // ========================================================================
+    // Phase 3: Prompt Optimization
+    // ========================================================================
+
+    sendUpdate("prompt", "processing");
+    try {
+      const result = await optimizePrompt(
+        message,
+        conversationHistory,
+        analysis.intent,
+        analysis.sentiment,
+        analysis.style,
+        analysisModel,
+        analysisApiKey
+      );
+      results.optimizedPrompt = result.optimizedPrompt;
+      sendUpdate("prompt", "completed", { optimizedPrompt: result.optimizedPrompt });
+    } catch (error: any) {
+      sendUpdate("prompt", "error", undefined, error.message);
+      results.optimizedPrompt = message; // Fallback to original
+    }
+
+    // ========================================================================
+    // Phase 4: Parameter Tuning
+    // ========================================================================
+
     sendUpdate("parameters", "processing");
     try {
-      const [modelOption, optimizedPrompt] = await Promise.all([
-        promises.model,
-        promises.prompt
-      ]);
-      
       const parametersResult = await tuneParameters(
         results.intent,
         results.sentiment,
-        modelOption.model,
-        optimizedPrompt,
+        results.selectedModel.model,
+        results.optimizedPrompt,
         analysisModel,
         analysisApiKey
       );
@@ -266,41 +276,68 @@ export async function runAnalysisJob(
       sendUpdate("parameters", "completed", { parameters: parametersResult });
     } catch (error: any) {
       sendUpdate("parameters", "error", undefined, error.message);
-      // Use default parameters as fallback
-      results.parameters = {
-        temperature: 0.7,
-        top_p: 1.0,
-        max_tokens: 1000
-      };
+      results.parameters = { temperature: 0.7, top_p: 1.0, max_tokens: 1000 };
     }
 
-    // Phase 3: Generate actual AI response using selected model
+    // ========================================================================
+    // Phase 5: Generate AI Response
+    // ========================================================================
+
     let aiResponse = "";
-    if (!hasError) {
-      // Send a log entry to indicate we're prompting the model
-      sendUpdate("generating", "processing");
-      try {
-        const selectedModel: ModelOption = results.selectedModel;
-        aiResponse = await generateResponse(
-          results.optimizedPrompt,
-          conversationHistory,
-          selectedModel.provider,
-          selectedModel.model,
-          results.parameters,
-          apiKeys
-        );
-        sendUpdate("generating", "completed", { 
-          message: `Response generated using ${selectedModel.displayName} (${results.estimatedCost.displayText})` 
-        });
-        sendUpdate("response", "completed", { response: aiResponse });
-      } catch (error: any) {
-        sendUpdate("generating", "error", undefined, error.message);
-        sendUpdate("response", "error", undefined, error.message);
-        hasError = true;
+    sendUpdate("generating", "processing");
+    try {
+      const selectedModel: ModelOption = results.selectedModel;
+
+      // Use streaming to push tokens to client in real time
+      aiResponse = await generateResponseStream(
+        results.optimizedPrompt,
+        conversationHistory,
+        selectedModel.provider,
+        selectedModel.model,
+        results.parameters,
+        apiKeys,
+        (token: string) => {
+          sendUpdate("response_chunk", "processing", { token });
+        },
+        job.signal
+      );
+
+      sendUpdate("generating", "completed", {
+        message: `Response generated using ${selectedModel.displayName} (${results.estimatedCost.displayText})`
+      });
+      // Send final complete response (client uses this to finalize the message)
+      sendUpdate("response", "completed", { response: aiResponse });
+
+      // Save assistant response to DB if authenticated
+      if (job.userId && job.conversationId) {
+        try {
+          await storage.createMessage({
+            conversationId: job.conversationId,
+            role: "assistant",
+            content: aiResponse,
+          });
+          // Update conversation title from intent if it's still null
+          const conv = await storage.getConversation(job.conversationId);
+          if (conv && !conv.title) {
+            const title = analysis.intent.length > 60
+              ? analysis.intent.substring(0, 57) + "..."
+              : analysis.intent;
+            await storage.updateConversationTitle(job.conversationId, title);
+          }
+        } catch {
+          // Non-critical
+        }
       }
+    } catch (error: any) {
+      sendUpdate("generating", "error", undefined, error.message);
+      sendUpdate("response", "error", undefined, error.message);
+      hasError = true;
     }
 
-    // Phase 4: Validate the AI response against user's intent
+    // ========================================================================
+    // Phase 6: Response Validation
+    // ========================================================================
+
     if (!hasError && aiResponse) {
       sendUpdate("validating", "processing");
       try {
@@ -315,14 +352,12 @@ export async function runAnalysisJob(
           userSummary: validation.userSummary,
           validation: validation.validation
         });
-        
-        // Send completion signal with validation details
+
         sendUpdate("complete", "completed", {
           userSummary: validation.userSummary,
           validation: validation.validation
         });
       } catch (error: any) {
-        // If validation fails, still complete but without validation details
         sendUpdate("validating", "error", undefined, error.message);
         sendUpdate("complete", "completed");
       }
@@ -330,6 +365,57 @@ export async function runAnalysisJob(
       sendUpdate("complete", "error", undefined, "Analysis completed with errors");
     } else {
       sendUpdate("complete", "completed");
+    }
+
+    // ========================================================================
+    // Analytics Logging (fire-and-forget)
+    // ========================================================================
+
+    if (job.userId) {
+      const responseTimeMs = Date.now() - startTime;
+      try {
+        await storage.createAnalysisLog({
+          userId: job.userId,
+          intent: analysis.intent,
+          sentiment: analysis.sentiment,
+          style: analysis.style,
+          securityScore: analysis.securityScore,
+          securityHalted: false,
+          taskType: analysis.taskType,
+          complexity: analysis.complexity,
+          selectedModel: results.selectedModel?.model,
+          modelProvider: results.selectedModel?.provider,
+          routerRuleMatched: results.routerRuleMatched || null,
+          estimatedCost: results.estimatedCost?.totalCost,
+          promptQualityScore: analysis.promptQuality.score,
+          promptClarity: analysis.promptQuality.clarity,
+          promptSpecificity: analysis.promptQuality.specificity,
+          promptActionability: analysis.promptQuality.actionability,
+          parameters: results.parameters,
+          responseTimeMs,
+        });
+
+        // Update user progress
+        const progress = await storage.getUserProgress(job.userId);
+        if (progress) {
+          const newTotal = (progress.totalMessages ?? 0) + 1;
+          const qualityHistory = [...(progress.promptQualityHistory ?? []), analysis.promptQuality.score];
+          const avgQuality = qualityHistory.reduce((a, b) => a + b, 0) / qualityHistory.length;
+          const modelStats = { ...(progress.modelUsageStats ?? {}) };
+          const modelKey = results.selectedModel?.model || "unknown";
+          modelStats[modelKey] = (modelStats[modelKey] || 0) + 1;
+
+          await storage.updateUserProgress(job.userId, {
+            totalMessages: newTotal,
+            averagePromptQuality: Math.round(avgQuality),
+            promptQualityHistory: qualityHistory.slice(-100), // Keep last 100
+            modelUsageStats: modelStats,
+            lastActiveAt: new Date(),
+          });
+        }
+      } catch {
+        // Non-critical: analytics failure doesn't affect user experience
+      }
     }
   } catch (error: any) {
     sendUpdate("complete", "error", undefined, "Analysis job failed");

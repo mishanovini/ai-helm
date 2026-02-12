@@ -8,9 +8,12 @@ import { useToast } from "@/hooks/use-toast";
 import { Settings as SettingsIcon, Key, AlertCircle, CheckCircle2, ArrowLeft } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getStoredAPIKeys, saveAPIKeys, clearAPIKeys, hasAnyAPIKey, type APIKeys } from "@/lib/api-keys";
+import { ProgressCard } from "@/components/PromptProgressWidget";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function Settings() {
   const { toast } = useToast();
+  const { isAuthenticated, authRequired } = useAuth();
   const [keys, setKeys] = useState<APIKeys>({
     gemini: "",
     openai: "",
@@ -316,6 +319,13 @@ export default function Settings() {
             </div>
           </div>
         </Card>
+
+        {/* Progress widget - shown when authenticated */}
+        {authRequired && isAuthenticated && (
+          <div className="mb-6">
+            <ProgressCard />
+          </div>
+        )}
 
         <Card className="p-6 bg-muted/50">
           <h3 className="font-semibold mb-3">Security Best Practices</h3>

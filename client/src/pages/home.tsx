@@ -1,12 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import ChatMessage from "@/components/ChatMessage";
 import ChatInput from "@/components/ChatInput";
 import AnalysisDashboard, { type AnalysisData } from "@/components/AnalysisDashboard";
 import ProcessLog, { type LogEntry } from "@/components/ProcessLog";
 import DeepResearchModal from "@/components/DeepResearchModal";
+import ConversationSidebar from "@/components/ConversationSidebar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWebSocket } from "@/hooks/use-websocket";
+import { useAuth } from "@/hooks/use-auth";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { getStoredAPIKeys, hasAnyAPIKey } from "@/lib/api-keys";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -16,21 +19,29 @@ import { Link, useLocation } from "wouter";
 
 interface Message {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
 }
 
 export default function Home() {
   const [location] = useLocation();
+  const { isAuthenticated, authRequired } = useAuth();
+  const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showDeepResearchModal, setShowDeepResearchModal] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [hasAPIKeys, setHasAPIKeys] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const lastAssistantMessageRef = useRef<HTMLDivElement>(null);
+  const streamingMessageRef = useRef<string>("");
+
+  const showSidebar = authRequired && isAuthenticated;
 
   // Check for API keys on mount, route change, and window focus
   useEffect(() => {
@@ -38,27 +49,26 @@ export default function Home() {
       const keys = getStoredAPIKeys();
       setHasAPIKeys(hasAnyAPIKey(keys));
     };
-    
-    checkKeys();
-  }, [location]); // Re-run when route changes
 
-  // Additional check on window focus/visibility change as safety net
+    checkKeys();
+  }, [location]);
+
   useEffect(() => {
     const checkKeys = () => {
       const keys = getStoredAPIKeys();
       setHasAPIKeys(hasAnyAPIKey(keys));
     };
-    
+
     window.addEventListener('focus', checkKeys);
     window.addEventListener('visibilitychange', checkKeys);
-    
+
     return () => {
       window.removeEventListener('focus', checkKeys);
       window.removeEventListener('visibilitychange', checkKeys);
     };
   }, []);
 
-  // Auto-scroll to top of last assistant message when new messages are added
+  // Auto-scroll to top of last assistant message
   useEffect(() => {
     if (lastAssistantMessageRef.current) {
       lastAssistantMessageRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -66,7 +76,7 @@ export default function Home() {
   }, [messages]);
 
   const addLog = (message: string, type: LogEntry["type"]) => {
-    const timestamp = new Date().toLocaleTimeString('en-US', { 
+    const timestamp = new Date().toLocaleTimeString('en-US', {
       hour12: false,
       hour: '2-digit',
       minute: '2-digit',
@@ -81,25 +91,38 @@ export default function Home() {
   };
 
   const handleWebSocketMessage = useCallback((update: any) => {
-    const { phase, status, payload, error } = update;
+    const { phase, status, payload, error, jobId } = update;
 
-    // Handle different phases of analysis
+    // Track active job
+    if (jobId && phase === "started") {
+      setActiveJobId(jobId);
+    }
+
+    // Handle conversation creation from server
+    if (phase === "conversation_created" && payload?.conversationId) {
+      setConversationId(payload.conversationId);
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }
+
+    // Handle started - capture conversationId if provided
+    if (phase === "started" && payload?.conversationId && !conversationId) {
+      setConversationId(payload.conversationId);
+    }
+
     if (phase === "started") {
       addLog("Starting intelligent analysis pipeline...", "info");
-      // Reset analysis data for new analysis
       setAnalysisData({} as AnalysisData);
     } else if (phase === "intent" && status === "completed") {
-      // Remove processing log and add success
       setLogs(prev => prev.filter(log => log.message !== "Detecting intent..."));
       addLog(`Intent detected: ${payload.intent}`, "success");
       setAnalysisData(prev => ({ ...prev, intent: payload.intent } as AnalysisData));
     } else if (phase === "sentiment" && status === "completed") {
       setLogs(prev => prev.filter(log => log.message !== "Analyzing sentiment..."));
       addLog(`Sentiment: ${payload.sentiment}`, "success");
-      setAnalysisData(prev => ({ 
-        ...prev, 
+      setAnalysisData(prev => ({
+        ...prev,
         sentiment: payload.sentiment,
-        sentimentDetail: payload.sentimentDetail 
+        sentimentDetail: payload.sentimentDetail
       } as AnalysisData));
     } else if (phase === "style" && status === "completed") {
       setLogs(prev => prev.filter(log => log.message !== "Analyzing style..."));
@@ -111,19 +134,48 @@ export default function Home() {
       if (payload.securityExplanation) {
         addLog(`Risk: ${payload.securityExplanation}`, "info");
       }
-      setAnalysisData(prev => ({ 
-        ...prev, 
+      setAnalysisData(prev => ({
+        ...prev,
         securityScore: payload.securityScore,
-        securityExplanation: payload.securityExplanation 
+        securityExplanation: payload.securityExplanation
       } as AnalysisData));
+    } else if (phase === "promptQuality" && status === "completed") {
+      addLog(`Prompt quality: ${payload.promptQuality.score}/100`, "success");
+      setAnalysisData(prev => ({
+        ...prev,
+        promptQuality: payload.promptQuality
+      } as AnalysisData));
+    } else if (phase === "security_halt" && status === "error") {
+      addLog(`BLOCKED: Security score ${payload.score}/10 exceeds threshold ${payload.threshold}`, "error");
+      setAnalysisData(prev => ({
+        ...prev,
+        securityHalted: true,
+        securityThreshold: payload.threshold,
+        securityScore: payload.score,
+        securityExplanation: payload.explanation
+      } as AnalysisData));
+
+      const timestamp = new Date().toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      setMessages(prev => [...prev, {
+        id: `system-${Date.now()}`,
+        role: "system",
+        content: `This request was blocked due to security concerns (score ${payload.score}/10, threshold ${payload.threshold}). ${payload.explanation || ""} Contact your admin if you believe this is an error.`,
+        timestamp
+      }]);
+      setIsProcessing(false);
+      setIsGenerating(false);
     } else if (phase === "model" && status === "completed") {
       setLogs(prev => prev.filter(log => log.message !== "Selecting optimal model..."));
       addLog(`Model: ${payload.modelDisplayName || payload.selectedModel} (${payload.estimatedCost || '~$0.001'})`, "success");
       if (payload.reasoning) {
         addLog(`Selection: ${payload.reasoning}`, "info");
       }
-      setAnalysisData(prev => ({ 
-        ...prev, 
+      setAnalysisData(prev => ({
+        ...prev,
         selectedModel: payload.selectedModel,
         modelDisplayName: payload.modelDisplayName,
         modelProvider: payload.modelProvider,
@@ -142,23 +194,53 @@ export default function Home() {
       setAnalysisData(prev => ({ ...prev, parameters: payload.parameters } as AnalysisData));
     } else if (phase === "generating" && status === "processing") {
       addLog("Prompting AI model...", "processing");
-    } else if (phase === "generating" && status === "completed") {
-      setLogs(prev => prev.filter(log => !(log.type === "processing" && log.message === "Prompting AI model...")));
-      addLog(payload.message || "Response generated successfully", "success");
-    } else if (phase === "response" && status === "completed") {
-      
-      const timestamp = new Date().toLocaleTimeString('en-US', { 
+      setIsGenerating(true);
+      streamingMessageRef.current = "";
+      // Add a placeholder assistant message for streaming
+      const timestamp = new Date().toLocaleTimeString('en-US', {
         hour: 'numeric',
         minute: '2-digit',
         hour12: true
       });
-      
       setMessages(prev => [...prev, {
-        id: `assistant-${Date.now()}`,
+        id: `assistant-streaming`,
         role: "assistant",
-        content: payload.response,
+        content: "",
         timestamp
       }]);
+    } else if (phase === "response_chunk" && status === "processing") {
+      // Streaming token - append to the current assistant message
+      streamingMessageRef.current += payload.token;
+      const current = streamingMessageRef.current;
+      setMessages(prev => prev.map(m =>
+        m.id === "assistant-streaming"
+          ? { ...m, content: current }
+          : m
+      ));
+    } else if (phase === "generating" && status === "completed") {
+      setLogs(prev => prev.filter(log => !(log.type === "processing" && log.message === "Prompting AI model...")));
+      addLog(payload.message || "Response generated successfully", "success");
+      setIsGenerating(false);
+    } else if (phase === "response" && status === "completed") {
+      // Finalize the streaming message with the complete response
+      setMessages(prev => prev.map(m =>
+        m.id === "assistant-streaming"
+          ? { ...m, id: `assistant-${Date.now()}`, content: payload.response }
+          : m
+      ));
+      streamingMessageRef.current = "";
+    } else if (phase === "cancelled" && status === "completed") {
+      addLog("Generation cancelled by user", "info");
+      // Keep whatever was streamed so far, finalize the message
+      setMessages(prev => prev.map(m =>
+        m.id === "assistant-streaming"
+          ? { ...m, id: `assistant-${Date.now()}`, content: streamingMessageRef.current + "\n\n*(generation cancelled)*" }
+          : m
+      ));
+      streamingMessageRef.current = "";
+      setIsProcessing(false);
+      setIsGenerating(false);
+      setActiveJobId(null);
     } else if (phase === "validating" && status === "processing") {
       addLog("Validating response quality...", "processing");
     } else if (phase === "validating" && status === "completed") {
@@ -169,44 +251,56 @@ export default function Home() {
       }
     } else if (phase === "complete" && status === "completed") {
       if (payload?.userSummary && payload?.validation) {
-        addLog(`✓ Pipeline complete - ${payload.validation}`, "success");
+        addLog(`Pipeline complete - ${payload.validation}`, "success");
       } else {
-        addLog("✓ Pipeline complete - All analysis phases finished and response delivered successfully", "success");
+        addLog("Pipeline complete - All analysis phases finished and response delivered successfully", "success");
       }
       setIsProcessing(false);
+      setIsGenerating(false);
+      setActiveJobId(null);
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
     } else if (status === "error") {
       addLog(`Error in ${phase}: ${error || "Unknown error"}`, "error");
-      setIsProcessing(false);
+      if (phase === "complete") {
+        setIsProcessing(false);
+        setIsGenerating(false);
+        setActiveJobId(null);
+      }
     }
-  }, []);
+  }, [conversationId, queryClient]);
 
-  const { isConnected, sendMessage } = useWebSocket(handleWebSocketMessage);
+  const { isConnected, sendMessage, cancelJob } = useWebSocket(handleWebSocketMessage);
+
+  const handleStop = useCallback(() => {
+    if (activeJobId) {
+      cancelJob(activeJobId);
+    }
+  }, [activeJobId, cancelJob]);
 
   const simulateAnalysis = async (userMessage: string, useDeepResearch: boolean = false) => {
     setIsProcessing(true);
-    
-    // Check for API keys
+
     const apiKeys = getStoredAPIKeys();
     if (!hasAnyAPIKey(apiKeys)) {
       addLog("Error: No API keys configured. Please add at least one API key in Settings.", "error");
       setIsProcessing(false);
       return;
     }
-    
+
     if (!isConnected) {
       addLog("WebSocket not connected. Retrying...", "error");
       setIsProcessing(false);
       return;
     }
 
-    // Send conversation history along with the current message
     const sent = sendMessage({
       type: "analyze",
       payload: {
         message: userMessage,
-        conversationHistory: messages, // Include full conversation context
+        conversationHistory: messages,
+        conversationId,
         useDeepResearch,
-        apiKeys: apiKeys // Send API keys with the request
+        apiKeys: apiKeys
       }
     });
 
@@ -217,18 +311,16 @@ export default function Home() {
   };
 
   const handleSendMessage = async (content: string) => {
-    // Check if deep research should be triggered (randomly for demo)
-    const shouldUseDeepResearch = content.toLowerCase().includes("deep") || 
+    const shouldUseDeepResearch = content.toLowerCase().includes("deep") ||
                                    content.toLowerCase().includes("research") ||
                                    Math.random() > 0.8;
 
-    const timestamp = new Date().toLocaleTimeString('en-US', { 
+    const timestamp = new Date().toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
       hour12: true
     });
 
-    // Add user message
     setMessages(prev => [...prev, {
       id: `user-${Date.now()}`,
       role: "user",
@@ -256,10 +348,49 @@ export default function Home() {
     setPendingMessage("");
   };
 
+  const handleSelectConversation = async (id: string | null) => {
+    if (id === conversationId) return;
+
+    setConversationId(id);
+    setAnalysisData(null);
+    setLogs([]);
+
+    if (!id) {
+      setMessages([]);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/conversations/${id}/messages`);
+      if (res.ok) {
+        const dbMessages = await res.json();
+        setMessages(dbMessages.map((m: any) => ({
+          id: m.id,
+          role: m.role as "user" | "assistant",
+          content: m.content,
+          timestamp: new Date(m.createdAt).toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+          }),
+        })));
+      }
+    } catch (err) {
+      console.error("Failed to load conversation messages:", err);
+    }
+  };
+
+  const handleNewChat = () => {
+    setConversationId(null);
+    setMessages([]);
+    setAnalysisData(null);
+    setLogs([]);
+  };
+
   return (
     <div className="h-screen flex flex-col bg-background">
       <Header />
-      
+
       {!hasAPIKeys && (
         <div className="px-6 pt-4">
           <Alert variant="destructive" data-testid="alert-no-api-keys">
@@ -277,71 +408,98 @@ export default function Home() {
           </Alert>
         </div>
       )}
-      
-      <div className="flex-1 overflow-hidden p-6">
-        <ResizablePanelGroup direction="vertical" className="h-full">
-          {/* Top Section: Chat + Dashboard */}
-          <ResizablePanel defaultSize={50} minSize={30}>
-            <ResizablePanelGroup direction="horizontal" className="h-full gap-6">
-              {/* Chat Area */}
-              <ResizablePanel defaultSize={60} minSize={40}>
-                <div className="flex flex-col h-full">
-                  <ScrollArea className="flex-1 pr-4">
-                    <div className="space-y-4 pb-4">
-                      {messages.length === 0 ? (
-                        <div className="flex items-center justify-center h-64">
-                          <div className="text-center">
-                            <p className="text-muted-foreground mb-2">
-                              Welcome to AI Helm, your universal AI interface
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              We automatically select and fine-tune the optimal model for every prompt
-                            </p>
+
+      <div className="flex-1 overflow-hidden flex">
+        {showSidebar && (
+          <ConversationSidebar
+            activeConversationId={conversationId}
+            onSelectConversation={handleSelectConversation}
+            onNewChat={handleNewChat}
+          />
+        )}
+
+        <div className="flex-1 overflow-hidden p-6">
+          <ResizablePanelGroup direction="vertical" className="h-full">
+            {/* Top Section: Chat + Dashboard */}
+            <ResizablePanel defaultSize={50} minSize={30}>
+              <ResizablePanelGroup direction="horizontal" className="h-full gap-6">
+                {/* Chat Area */}
+                <ResizablePanel defaultSize={60} minSize={40}>
+                  <div className="flex flex-col h-full">
+                    <ScrollArea className="flex-1 pr-4">
+                      <div className="space-y-4 pb-4">
+                        {messages.length === 0 ? (
+                          <div className="flex items-center justify-center h-64">
+                            <div className="text-center">
+                              <p className="text-muted-foreground mb-2">
+                                Welcome to AI Helm, your universal AI interface
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                We automatically select and fine-tune the optimal model for every prompt
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        messages.map((msg, index) => {
-                          // Attach ref to the last assistant message
-                          const isLastAssistant = msg.role === "assistant" && 
-                            index === messages.length - 1;
-                          
-                          return (
-                            <ChatMessage
-                              key={msg.id}
-                              ref={isLastAssistant ? lastAssistantMessageRef : null}
-                              role={msg.role}
-                              content={msg.content}
-                              timestamp={msg.timestamp}
-                            />
-                          );
-                        })
-                      )}
+                        ) : (
+                          messages.map((msg, index) => {
+                            const isLastAssistant = msg.role === "assistant" &&
+                              index === messages.length - 1;
+
+                            if (msg.role === "system") {
+                              return (
+                                <div key={msg.id} className="px-4 py-2">
+                                  <Alert variant="destructive">
+                                    <AlertCircle className="h-4 w-4" />
+                                    <AlertDescription className="text-sm">
+                                      {msg.content}
+                                    </AlertDescription>
+                                  </Alert>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <ChatMessage
+                                key={msg.id}
+                                ref={isLastAssistant ? lastAssistantMessageRef : null}
+                                role={msg.role}
+                                content={msg.content}
+                                timestamp={msg.timestamp}
+                              />
+                            );
+                          })
+                        )}
+                      </div>
+                    </ScrollArea>
+                    <div className="mt-4">
+                      <ChatInput
+                        onSendMessage={handleSendMessage}
+                        onStop={handleStop}
+                        disabled={isProcessing}
+                        isGenerating={isGenerating}
+                      />
                     </div>
-                  </ScrollArea>
-                  <div className="mt-4">
-                    <ChatInput onSendMessage={handleSendMessage} disabled={isProcessing} />
                   </div>
-                </div>
-              </ResizablePanel>
+                </ResizablePanel>
 
-              <ResizableHandle withHandle />
+                <ResizableHandle withHandle />
 
-              {/* Dashboard Area */}
-              <ResizablePanel defaultSize={40} minSize={30}>
-                <ScrollArea className="h-full pr-4">
-                  <AnalysisDashboard data={analysisData} />
-                </ScrollArea>
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          </ResizablePanel>
+                {/* Dashboard Area */}
+                <ResizablePanel defaultSize={40} minSize={30}>
+                  <ScrollArea className="h-full pr-4">
+                    <AnalysisDashboard data={analysisData} />
+                  </ScrollArea>
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </ResizablePanel>
 
-          <ResizableHandle withHandle />
+            <ResizableHandle withHandle />
 
-          {/* Bottom Section: Process Log */}
-          <ResizablePanel defaultSize={50} minSize={20}>
-            <ProcessLog logs={logs} isProcessing={isProcessing} />
-          </ResizablePanel>
-        </ResizablePanelGroup>
+            {/* Bottom Section: Process Log */}
+            <ResizablePanel defaultSize={50} minSize={20}>
+              <ProcessLog logs={logs} isProcessing={isProcessing} />
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
       </div>
 
       <DeepResearchModal

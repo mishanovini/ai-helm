@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send } from "lucide-react";
+import { Send, Square } from "lucide-react";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
+  onStop?: () => void;
   disabled?: boolean;
+  isGenerating?: boolean;
 }
 
-export default function ChatInput({ onSendMessage, disabled }: ChatInputProps) {
+export default function ChatInput({ onSendMessage, onStop, disabled, isGenerating }: ChatInputProps) {
   const [message, setMessage] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -39,15 +41,28 @@ export default function ChatInput({ onSendMessage, disabled }: ChatInputProps) {
           className="resize-none min-h-16 max-h-32"
           rows={2}
         />
-        <Button 
-          data-testid="button-send"
-          type="submit" 
-          size="icon" 
-          disabled={!message.trim() || disabled}
-          className="shrink-0"
-        >
-          <Send className="h-4 w-4" />
-        </Button>
+        {isGenerating ? (
+          <Button
+            data-testid="button-stop"
+            type="button"
+            size="icon"
+            variant="destructive"
+            onClick={onStop}
+            className="shrink-0"
+          >
+            <Square className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button
+            data-testid="button-send"
+            type="submit"
+            size="icon"
+            disabled={!message.trim() || disabled}
+            className="shrink-0"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </form>
   );

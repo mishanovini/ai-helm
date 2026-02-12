@@ -2,7 +2,16 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Brain, Shield, Sparkles, Settings, Code } from "lucide-react";
+import { Brain, Shield, ShieldAlert, Sparkles, Settings, Code, Lightbulb } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
+export interface PromptQualityData {
+  score: number;
+  clarity: number;
+  specificity: number;
+  actionability: number;
+  suggestions: string[];
+}
 
 export interface AnalysisData {
   intent: string;
@@ -11,6 +20,8 @@ export interface AnalysisData {
   style: string;
   securityScore: number;
   securityExplanation?: string;
+  securityHalted?: boolean;
+  securityThreshold?: number;
   selectedModel: string;
   modelDisplayName?: string;
   modelProvider?: "gemini" | "openai" | "anthropic";
@@ -24,6 +35,7 @@ export interface AnalysisData {
   };
   optimizedPrompt: string;
   parameters: Record<string, number | string>;
+  promptQuality?: PromptQualityData;
 }
 
 interface AnalysisDashboardProps {
@@ -55,6 +67,18 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
     return <Sparkles className="h-3 w-3" />;
   };
 
+  const getQualityColor = (score: number) => {
+    if (score >= 70) return "text-chart-2";
+    if (score >= 40) return "text-chart-3";
+    return "text-destructive";
+  };
+
+  const getQualityBarColor = (score: number) => {
+    if (score >= 70) return "bg-chart-2";
+    if (score >= 40) return "bg-chart-3";
+    return "bg-destructive";
+  };
+
   return (
     <div className="sticky top-4 space-y-4">
       <div className="flex items-center justify-between mb-2">
@@ -72,6 +96,26 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
         </Card>
       ) : (
         <>
+          {/* Security Halt Alert */}
+          {data.securityHalted && (
+            <Alert variant="destructive" data-testid="alert-security-halt">
+              <ShieldAlert className="h-4 w-4" />
+              <AlertTitle>Request Blocked</AlertTitle>
+              <AlertDescription className="mt-1 space-y-1">
+                <p>
+                  Security score <strong>{data.securityScore}/10</strong> exceeds
+                  threshold {data.securityThreshold ?? 8}.
+                </p>
+                {data.securityExplanation && (
+                  <p className="text-xs opacity-80">{data.securityExplanation}</p>
+                )}
+                <p className="text-xs opacity-80">
+                  Contact your admin if you believe this is an error.
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Intent - Compact */}
           <Card className="p-3">
             <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
@@ -81,6 +125,59 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
               {data.intent || <span className="text-muted-foreground animate-pulse">Analyzing...</span>}
             </p>
           </Card>
+
+          {/* Prompt Quality Card */}
+          {data.promptQuality && (
+            <Card className="p-4" data-testid="card-prompt-quality">
+              <label className="text-xs uppercase tracking-wide text-muted-foreground font-medium flex items-center gap-1 mb-3">
+                <Lightbulb className="h-3 w-3" />
+                Prompt Quality
+              </label>
+              <div className="space-y-3">
+                <div className="flex items-baseline gap-2">
+                  <span className={`text-xl font-bold ${getQualityColor(data.promptQuality.score)}`} data-testid="text-prompt-quality-score">
+                    {data.promptQuality.score}
+                  </span>
+                  <span className="text-xs text-muted-foreground">/ 100</span>
+                </div>
+
+                <div className="space-y-2">
+                  {[
+                    { label: "Clarity", value: data.promptQuality.clarity },
+                    { label: "Specificity", value: data.promptQuality.specificity },
+                    { label: "Actionability", value: data.promptQuality.actionability },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className="font-medium">{value}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
+                        <div
+                          className={`h-full transition-all ${getQualityBarColor(value)}`}
+                          style={{ width: `${value}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {data.promptQuality.suggestions.length > 0 && (
+                  <div className="pt-2 border-t">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Suggestions</p>
+                    <ul className="space-y-1">
+                      {data.promptQuality.suggestions.map((suggestion, i) => (
+                        <li key={i} className="text-xs text-muted-foreground flex gap-1.5">
+                          <span className="text-primary shrink-0">-</span>
+                          {suggestion}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
 
           {/* Selected Model and Parameters - Combined */}
           <Card className="p-4">
@@ -193,7 +290,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                         <span className="text-xs text-muted-foreground">/ 10</span>
                       </div>
                       <div className={`w-full h-1.5 bg-secondary rounded-full overflow-hidden`}>
-                        <div 
+                        <div
                           className={`h-full transition-all ${getSecurityBgColor(data.securityScore)}`}
                           style={{ width: `${data.securityScore * 10}%` }}
                         />
@@ -208,8 +305,8 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 </div>
               </div>
             </div>
-            
-            {data.securityExplanation && (
+
+            {data.securityExplanation && !data.securityHalted && (
               <div className="mt-3 pt-3 border-t">
                 <p className="text-xs text-muted-foreground" data-testid="text-security-explanation">
                   {data.securityExplanation}

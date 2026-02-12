@@ -30,11 +30,9 @@
  * See SECURITY.md for full security documentation.
  */
 
-export interface APIKeys {
-  gemini: string;
-  openai: string;
-  anthropic: string;
-}
+import type { APIKeys } from "@shared/types";
+
+export type { APIKeys };
 
 const STORAGE_KEY = "ai_api_keys";
 
