@@ -1,26 +1,38 @@
-# AI Helm 🤖⚡
+# AI Helm
 
-An open-source universal AI interface with intelligent middleware that optimizes prompts and selects the best AI model for each task.
+An open-source universal AI interface with intelligent middleware that optimizes prompts, selects the best AI model for each task, and provides a full-featured admin and learning platform.
 
 ## Features
 
-✨ **Intelligent Model Selection** - Automatically selects the optimal AI model (GPT-5, Claude 4.5, Gemini 2.5) based on task type, complexity, and cost
-📊 **Real-Time Analysis Dashboard** - Live processing insights showing intent, sentiment, style, security, and optimization phases
-🔐 **Privacy-First Architecture** - User-provided API keys stored locally in browser, never on servers
-💰 **Cost Transparency** - Displays estimated cost before generation with intelligent cost optimization
-🎯 **Response Validation** - Analyzes AI responses to verify they address user intent
-🔄 **Conversation Threading** - Full conversation history sent to AI models for contextual responses
-⚡ **WebSocket Streaming** - Real-time log streaming of analysis pipeline
+**Intelligent Model Selection** - Automatically selects the optimal AI model (GPT-5, Claude 4.5, Gemini 2.5) based on task type, complexity, and cost via a configurable dynamic router.
+
+**Consolidated Analysis Pipeline** - Single-call analysis extracts intent, sentiment, style, security risk, task type, complexity, and prompt quality in one LLM request (~75% cost reduction vs. individual calls).
+
+**Real-Time Streaming** - WebSocket-based response streaming with live analysis dashboard showing processing phases and a stop button for cancellation.
+
+**Authentication & Multi-User** - OAuth login via Google and GitHub, session management, role-based access (user/admin), organization support.
+
+**Dynamic Model Router** - Configurable rule-based routing with version history, natural language editing ("make coding tasks use Claude"), and side-by-side version comparison.
+
+**Learning Center** - Built-in curriculum with 11 lessons across 5 categories, prerequisite gating, and progress tracking.
+
+**Admin Console** - Organization analytics, cost analysis, model performance metrics, user management, API key approval workflows, and users-needing-attention alerts.
+
+**Privacy-First Architecture** - User-provided API keys stored locally in browser, never on servers. Optional server-side AES-256-GCM encryption for org-managed keys.
+
+**Conversation Persistence** - Full conversation history with search, sidebar navigation, and WebSocket message saving.
+
+**Progress Tracking** - Per-user prompt quality sparkline, trend indicators, lesson completion, and model usage stats visible in header and settings.
 
 ## Quick Start
 
 ### Prerequisites
 
-- Node.js 18+ 
-- npm or yarn
-- PostgreSQL database (for production)
+- Node.js 18+
+- npm
+- PostgreSQL database (required for auth and persistence)
 - API keys from at least one provider:
-  - [Google AI Studio](https://makersuite.google.com/app/apikey) (Gemini)
+  - [Google AI Studio](https://aistudio.google.com/apikey) (Gemini)
   - [OpenAI Platform](https://platform.openai.com/api-keys) (GPT)
   - [Anthropic Console](https://console.anthropic.com/) (Claude)
 
@@ -37,181 +49,216 @@ npm install
 # Copy environment template
 cp .env.example .env
 
-# Edit .env and add your DATABASE_URL (required for production)
-# Note: API keys are provided by users via web interface, not .env
+# Edit .env with your configuration (see Environment Variables below)
 
-# Run database setup (if using authentication)
+# Push database schema
 npm run db:push
 
 # Start development server
 npm run dev
 ```
 
-The application will be available at `http://localhost:5000`
+The application will be available at `http://localhost:5000`.
 
 ### First-Time Setup
 
-1. Navigate to **Settings** (gear icon in top-right)
-2. Enter your API key(s) - you only need one provider minimum
+1. Navigate to **Settings** (gear icon)
+2. Enter your API key(s) - at least one provider required
 3. Click **Save API Keys**
-4. Return to home and start chatting!
+4. Return to home and start chatting
 
-## How It Works
+If authentication is enabled (`REQUIRE_AUTH=true`), you'll be prompted to sign in via Google or GitHub first.
 
-### Architecture Overview
+## Architecture
 
 ```
 User Prompt
-    ↓
-Analysis Pipeline (Gemini 2.5 Flash-Lite)
-    ├── Intent Detection
-    ├── Sentiment Analysis
-    ├── Style Inference
-    ├── Security Risk Scoring
-    ├── Prompt Optimization
-    └── Model Selection
-    ↓
+    |
+Consolidated Analysis (single LLM call)
+    |-- Intent Detection
+    |-- Sentiment Analysis
+    |-- Style Inference
+    |-- Security Risk Scoring (regex pre-check + AI)
+    |-- Task Type & Complexity Classification
+    |-- Prompt Quality Scoring
+    |
+Dynamic Router (rule evaluation)
+    |-- Match against configured rules (first-match-wins)
+    |-- Fall back to catch-all model priority
+    |
 Parameter Tuning (temperature, top_p, max_tokens)
-    ↓
-AI Response Generation (Selected Model)
-    ↓
-Response Validation
-    ↓
+    |
+AI Response Generation (selected model, streamed)
+    |
+User Progress Update
+    |
 Display to User
 ```
 
 ### Model Selection Logic
 
-AI Helm uses a decision tree to select the optimal model:
+The dynamic router evaluates rules in order. Default rules include:
 
-- **Simple tasks** → Ultra-cheap models (Gemini Flash-Lite $0.10, GPT-5 Nano $0.15)
-- **Creative writing** → Claude Opus/Sonnet for style preservation
-- **Complex coding** → Claude Sonnet 4.5 (77.2% SWE-bench)
-- **Advanced math** → Gemini 2.5 Pro (86.7% AIME)
-- **Large context** → Gemini 2.5 Pro (1M token window)
-- **Speed-critical** → Fastest available model
+- **Simple tasks** - Ultra-cheap models (Gemini Flash-Lite, GPT-5 Nano)
+- **Complex coding** - Claude Sonnet 4.5 or Gemini 2.5 Pro
+- **Advanced math** - Gemini 2.5 Pro
+- **Creative writing** - Claude Opus 4.1 or Claude Sonnet 4.5
+- **Conversation** - GPT-5
+- **Large context (>200K tokens)** - Gemini 2.5 Pro (1M token window)
 
-### Privacy & Security
+Rules are fully customizable via the Router page, including natural language editing.
 
-🔒 **Your API Keys**:
-- Stored in browser `localStorage` only
-- Never transmitted to AI Helm servers
-- Sent directly to AI providers (Gemini, OpenAI, Anthropic)
-- You maintain full control and billing
-
-⚠️ **Security Considerations**:
-- localStorage is vulnerable to XSS attacks
-- Always deploy with HTTPS in production
-- Configure Content Security Policy headers
-- See [SECURITY.md](SECURITY.md) for full details
-
-## Development
-
-### Project Structure
+## Project Structure
 
 ```
 ai-helm/
-├── client/           # React + TypeScript frontend
-│   ├── src/
-│   │   ├── pages/    # Home, Settings pages
-│   │   ├── components/ # UI components
-│   │   └── lib/      # Utilities (API keys, WebSocket)
-├── server/           # Express.js backend
-│   ├── routes.ts     # API routes + WebSocket
-│   ├── analysis-orchestrator.ts  # Pipeline coordinator
-│   ├── universal-analysis.ts     # Multi-provider analysis
-│   └── response-generator.ts     # AI response generation
-├── shared/           # Shared types and logic
-│   ├── schema.ts     # Database schema (Drizzle ORM)
-│   └── model-selection.ts  # Model decision tree
-└── SECURITY.md       # Security documentation
+|-- client/                    # React + TypeScript frontend
+|   |-- src/
+|       |-- pages/             # Home, Settings, Router, Admin, Learn, Login
+|       |-- components/        # UI components, ErrorBoundary, ProgressWidget
+|       |-- hooks/             # use-auth, use-websocket, use-toast
+|       |-- lib/               # api-keys, utils
+|-- server/                    # Express.js backend
+|   |-- routes.ts              # REST API + WebSocket server
+|   |-- auth.ts                # OAuth strategies (Google, GitHub)
+|   |-- storage.ts             # DatabaseStorage (Drizzle ORM)
+|   |-- analysis-orchestrator.ts  # Pipeline coordinator
+|   |-- consolidated-analysis.ts  # Single-call analysis
+|   |-- dynamic-router.ts      # Rule engine + NL editing
+|   |-- response-generator.ts  # Multi-provider streaming
+|   |-- encryption.ts          # AES-256-GCM for API keys
+|   |-- db.ts                  # Database connection (lazy init)
+|-- shared/                    # Shared between client and server
+|   |-- schema.ts              # 11-table Drizzle schema + Zod validation
+|   |-- types.ts               # Shared TypeScript interfaces
+|   |-- model-selection.ts     # Model catalog + decision tree
+|   |-- curriculum.ts          # Learning system lessons
+|-- tests/                     # Vitest test suite
+|   |-- shared/                # Model selection tests
+|   |-- server/                # Router, encryption, analysis tests
+|-- vitest.config.ts           # Test configuration
 ```
 
-### Tech Stack
+## Tech Stack
 
-- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui
+- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, wouter, React Query
 - **Backend**: Express.js, WebSocket (ws), TypeScript
-- **Database**: PostgreSQL + Drizzle ORM (optional, for auth)
-- **AI Providers**: Gemini, OpenAI, Anthropic SDKs
+- **Database**: PostgreSQL + Drizzle ORM + Zod validation
+- **Auth**: Passport.js (Google OAuth, GitHub OAuth), connect-pg-simple sessions
+- **AI Providers**: Google GenAI, OpenAI, Anthropic SDKs
+- **Testing**: Vitest
 
-### Available Scripts
+## Available Scripts
 
 ```bash
 npm run dev          # Start development server with HMR
-npm run build        # Build for production
-npm run db:push      # Sync database schema
-npm run db:generate  # Generate Drizzle migrations
+npm run build        # Build for production (Vite + esbuild)
+npm start            # Run production build
+npm run check        # TypeScript type checking
+npm test             # Run test suite (vitest)
+npm run test:watch   # Run tests in watch mode
+npm run db:push      # Sync database schema to PostgreSQL
 ```
 
-### Environment Variables
+## Environment Variables
 
-Create a `.env` file (see `.env.example`):
+Create a `.env` file from `.env.example`:
 
 ```bash
-DATABASE_URL=postgresql://user:password@localhost:5432/dbname
+# Required
+DATABASE_URL=postgresql://user:password@localhost:5432/aihelm
+
+# Authentication (set REQUIRE_AUTH=true to enable)
+REQUIRE_AUTH=false
+SESSION_SECRET=your-secure-random-string
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GITHUB_CLIENT_ID=your-github-client-id
+GITHUB_CLIENT_SECRET=your-github-client-secret
+
+# Server-side API key encryption (optional, for org-managed keys)
+# Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+ENCRYPTION_KEY=64-char-hex-string
+
+# Server
 PORT=5000
 NODE_ENV=development
-SESSION_SECRET=your-secure-random-string
 ```
 
-**Note**: API keys are NOT stored in `.env` - users provide them via the web interface.
+User-provided API keys are stored in browser `localStorage` and are never sent to the AI Helm server.
+
+## API Endpoints
+
+### Authentication
+- `GET /auth/google` - Google OAuth login
+- `GET /auth/github` - GitHub OAuth login
+- `GET /auth/me` - Current user info
+- `POST /auth/logout` - Sign out
+
+### Conversations
+- `POST /api/conversations` - Create conversation
+- `GET /api/conversations` - List conversations
+- `GET /api/conversations/search?q=` - Search conversations
+- `GET /api/conversations/:id/messages` - Get messages
+- `DELETE /api/conversations/:id` - Delete conversation
+
+### Router Configuration
+- `GET /api/router/config` - Get active config
+- `PUT /api/router/config` - Update config (creates version)
+- `GET /api/router/config/history` - Version history
+- `POST /api/router/config/revert/:version` - Revert to version
+- `POST /api/router/config/edit-natural-language` - AI-powered config editing
+
+### User Progress
+- `GET /api/progress` - Current user's progress
+
+### Admin (requires admin role)
+- `GET /api/admin/analytics/overview` - Org analytics
+- `GET /api/admin/analytics/model-usage` - Model usage stats
+- `GET /api/admin/users` - User list with progress
+- `GET /api/admin/api-keys` - API key management
+- `PATCH /api/admin/api-keys/:id` - Approve/reject keys
+- `PATCH /api/admin/settings` - Update org settings
+
+### WebSocket
+- `ws://localhost:5000/ws` - Analysis pipeline streaming + chat
+
+## Testing
+
+```bash
+# Run all tests
+npm test
+
+# Watch mode
+npm run test:watch
+```
+
+Test coverage includes:
+- **Model selection** (35 tests) - catalog integrity, prompt analysis, optimal model selection, cost estimation
+- **Dynamic router** (24 tests) - default rules, condition matching, first-match-wins evaluation
+- **Encryption** (9 tests) - round-trip, random IV, unicode, tampering detection
+- **Consolidated analysis** (33 tests) - schema validation, security regex patterns, JSON parsing
 
 ## Production Deployment
 
 ### Security Checklist
 
-- [ ] HTTPS/TLS enabled (required)
-- [ ] Content Security Policy headers configured
+- [ ] HTTPS/TLS enabled
+- [ ] `SESSION_SECRET` set to a strong random value
+- [ ] `ENCRYPTION_KEY` set for server-side key storage
 - [ ] Database secured with strong password
 - [ ] Rate limiting at reverse proxy level
 - [ ] CORS configured for allowed origins
-- [ ] `.env` file secured (never committed to git)
+- [ ] `.env` file secured (never committed)
+- [ ] Content Security Policy headers configured
 - [ ] Regular `npm audit` runs
-- [ ] Monitoring and error logging enabled
 
 ### Example Deployment (nginx + PM2)
 
 ```bash
-# Build production bundle
 npm run build
-
-# Start with PM2
 pm2 start npm --name "ai-helm" -- start
-
-# nginx reverse proxy (see SECURITY.md for full config)
-# Configure SSL, CSP headers, rate limiting
-```
-
-### Replit Deployment
-
-This project is Replit-ready:
-
-1. Import repository to Replit
-2. Set `DATABASE_URL` secret
-3. Click **Run**
-4. Share your Repl URL
-
-## Configuration
-
-### Model Pricing (Update as needed)
-
-Edit `shared/model-selection.ts` to update pricing:
-
-```typescript
-export const MODEL_PRICING: Record<string, ModelPricing> = {
-  'gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
-  'gpt-5': { input: 2.00, output: 8.00 },
-  // ...
-};
-```
-
-### Analysis Model
-
-The analysis pipeline uses the cheapest available model (default: Gemini 2.5 Flash-Lite).
-Change in `server/analysis-orchestrator.ts`:
-
-```typescript
-const analysisModel = selectCheapestModel(availableProviders);
+# Configure nginx reverse proxy with SSL, CSP headers, rate limiting
 ```
 
 ## Contributing
@@ -220,43 +267,14 @@ Contributions welcome! Please:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Security Contributions
-
-See [SECURITY.md](SECURITY.md) for vulnerability reporting and security checklist.
-
-## Roadmap
-
-- [ ] User authentication system
-- [ ] Server-side key encryption
-- [ ] Conversation history persistence
-- [ ] Custom model configurations
-- [ ] Customization of model decision tree
-- [ ] Org-wide design allowing central management of multiple users
-- [ ] Batch processing mode
-- [ ] API endpoint for programmatic access
-- [ ] Multi-language support
-- [ ] Prompt templates library
+3. Commit your changes
+4. Push and open a Pull Request
 
 ## License
 
-Apache License 2.0 - see [LICENSE](LICENSE) for details
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
 - Built with [shadcn/ui](https://ui.shadcn.com/) components
 - Powered by [Gemini](https://ai.google.dev/), [OpenAI](https://openai.com/), and [Anthropic](https://anthropic.com/) AI models
-- Inspired by the need for transparent AI middleware
-
-## Support
-
-- 📖 [Documentation](SECURITY.md)
-- 🐛 [Issue Tracker](https://github.com/mishanovini/ai-helm/issues)
-- 💬 [Discussions](https://github.com/mishanovini/ai-helm/discussions)
-
----
-
-Made with ❤️ for the open-source community
