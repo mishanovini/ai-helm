@@ -10,6 +10,7 @@ import { validateAPIKey } from "./api-key-validator";
 import { requireAuth, requireAdmin, isAuthRequired, parseSessionFromUpgrade } from "./auth";
 import { getDefaultRules, seedDefaultConfig, editConfigWithNaturalLanguage } from "./dynamic-router";
 import { encrypt, decrypt, isEncryptionConfigured } from "./encryption";
+import { demoBudget, isDemoMode, getDemoKeys, hasAnyDemoKey } from "./demo-budget";
 
 /**
  * Simple in-memory rate limiter for WebSocket connections
@@ -750,6 +751,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ========================================================================
+  // Demo Status (no auth required — public endpoint)
+  // ========================================================================
+
+  app.get("/api/demo-status", (req, res) => {
+    if (!isDemoMode() || !hasAnyDemoKey()) {
+      return res.json({ enabled: false, remainingMessages: 0, maxMessages: 0, budgetExhausted: false });
+    }
+    const clientIP = getClientIP(req);
+    // Use IP as session identifier for REST (WS connections use connection ID)
+    const status = demoBudget.getStatus(clientIP, clientIP);
+    res.json(status);
+  });
+
   app.patch("/api/admin/settings", requireAdmin, async (req, res) => {
     try {
       const orgId = req.user?.orgId;
@@ -919,8 +934,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return;
           }
 
-          // Validate API keys - require at least one provider
-          if (!apiKeys || (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic)) {
+          // Resolve API keys: user-provided keys take priority, then demo keys
+          let resolvedKeys = apiKeys;
+          let isDemoRequest = false;
+
+          const userHasKeys = resolvedKeys && (resolvedKeys.gemini || resolvedKeys.openai || resolvedKeys.anthropic);
+
+          if (!userHasKeys && isDemoMode() && hasAnyDemoKey()) {
+            // Demo mode: check rate limits before injecting demo keys
+            const demoCheck = demoBudget.canSend(clientIP, clientIP);
+            if (!demoCheck.allowed) {
+              ws.send(JSON.stringify({
+                jobId,
+                phase: "error",
+                status: "error",
+                error: demoCheck.reason || "Demo rate limit exceeded."
+              }));
+              return;
+            }
+            resolvedKeys = getDemoKeys();
+            isDemoRequest = true;
+          } else if (!userHasKeys) {
+            // No keys and no demo mode
             ws.send(JSON.stringify({
               jobId,
               phase: "error",
@@ -968,13 +1003,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           activeJobs.set(jobId, abortController);
 
           // Run the analysis job with real-time updates
-          await runAnalysisJob(
+          const jobResult = await runAnalysisJob(
             {
               jobId,
               message: userMessage,
               conversationHistory,
               useDeepResearch,
-              apiKeys,
+              apiKeys: resolvedKeys,
               userId,
               orgId,
               conversationId: activeConversationId,
@@ -982,6 +1017,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             },
             ws
           );
+
+          // Track cost for demo requests
+          if (isDemoRequest && jobResult?.estimatedCost) {
+            demoBudget.recordCost(jobResult.estimatedCost);
+          }
 
           activeJobs.delete(jobId);
         }

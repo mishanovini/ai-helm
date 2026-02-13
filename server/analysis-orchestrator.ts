@@ -34,10 +34,15 @@ export interface AnalysisJob {
 // Default security threshold if org settings not available
 const DEFAULT_SECURITY_THRESHOLD = 8;
 
+/** Result returned after a job completes, used for demo cost tracking */
+export interface AnalysisJobResult {
+  estimatedCost?: number;
+}
+
 export async function runAnalysisJob(
   job: AnalysisJob,
   ws: WebSocket
-): Promise<void> {
+): Promise<AnalysisJobResult | undefined> {
   const { jobId, message, conversationHistory, useDeepResearch, apiKeys } = job;
 
   const results: any = {};
@@ -417,7 +422,10 @@ export async function runAnalysisJob(
         // Non-critical: analytics failure doesn't affect user experience
       }
     }
+
+    return { estimatedCost: results.estimatedCost?.totalCost };
   } catch (error: any) {
     sendUpdate("complete", "error", undefined, "Analysis job failed");
+    return undefined;
   }
 }

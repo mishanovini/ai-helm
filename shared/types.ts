@@ -65,6 +65,14 @@ export interface RouterRule {
   reasoning: string;
 }
 
+/** Status of demo mode, returned by GET /api/demo-status */
+export interface DemoStatus {
+  enabled: boolean;
+  remainingMessages: number;
+  maxMessages: number;
+  budgetExhausted: boolean;
+}
+
 export interface RouterConfig {
   id: string;
   orgId: string;

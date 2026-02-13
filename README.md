@@ -24,6 +24,8 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 **Progress Tracking** - Per-user prompt quality sparkline, trend indicators, lesson completion, and model usage stats visible in header and settings.
 
+**Demo Mode** - Public-facing demo with server-provided API keys, three-tier abuse protection (per-session, per-IP, and daily budget rate limiting), and automatic key injection. Users with their own keys bypass all demo limits.
+
 ## Quick Start
 
 ### Prerequisites
@@ -127,6 +129,7 @@ ai-helm/
 |   |-- dynamic-router.ts      # Rule engine + NL editing
 |   |-- response-generator.ts  # Multi-provider streaming
 |   |-- encryption.ts          # AES-256-GCM for API keys
+|   |-- demo-budget.ts         # Demo mode rate limiter + budget tracker
 |   |-- db.ts                  # Database connection (lazy init)
 |-- shared/                    # Shared between client and server
 |   |-- schema.ts              # 11-table Drizzle schema + Zod validation
@@ -187,6 +190,23 @@ NODE_ENV=development
 
 User-provided API keys are stored in browser `localStorage` and are never sent to the AI Helm server.
 
+### Demo Mode Variables
+
+```bash
+# Enable demo mode for public access with server-provided keys
+DEMO_MODE=false
+DEMO_GEMINI_KEY=your-demo-gemini-key
+DEMO_OPENAI_KEY=your-demo-openai-key
+DEMO_ANTHROPIC_KEY=your-demo-anthropic-key
+
+# Rate limits
+DEMO_SESSION_LIMIT=10      # Messages per session per hour
+DEMO_IP_LIMIT=30           # Messages per IP per hour (prevents bot flooding)
+DEMO_DAILY_BUDGET=2.00     # Max USD spend per day across all demo users
+```
+
+See the [Demo Mode](#demo-mode) section below for details.
+
 ## API Endpoints
 
 ### Authentication
@@ -211,6 +231,9 @@ User-provided API keys are stored in browser `localStorage` and are never sent t
 
 ### User Progress
 - `GET /api/progress` - Current user's progress
+
+### Demo
+- `GET /api/demo-status` - Demo mode status (no auth required)
 
 ### Admin (requires admin role)
 - `GET /api/admin/analytics/overview` - Org analytics
@@ -238,6 +261,37 @@ Test coverage includes:
 - **Dynamic router** (24 tests) - default rules, condition matching, first-match-wins evaluation
 - **Encryption** (9 tests) - round-trip, random IV, unicode, tampering detection
 - **Consolidated analysis** (33 tests) - schema validation, security regex patterns, JSON parsing
+- **Demo budget** (23 tests) - per-session and per-IP rate limiting, daily budget cap, midnight reset, status reporting
+
+## Demo Mode
+
+Demo mode allows you to host a public-facing instance where visitors can experience AI Helm's intelligent routing without providing their own API keys. You provide demo API keys via environment variables, and the server injects them for unauthenticated users.
+
+### How It Works
+
+1. Set `DEMO_MODE=true` and provide at least one `DEMO_*_KEY` in your `.env`
+2. Visitors without their own API keys see a demo banner with remaining message count
+3. The full intelligent routing pipeline runs (no forced cheap model) so visitors experience the real product
+4. Three layers of abuse protection prevent API key exhaustion:
+   - **Per-session limit** (default: 10 messages/hour per WebSocket connection)
+   - **Per-IP limit** (default: 30 messages/hour, prevents bot session flooding)
+   - **Daily budget cap** (default: $2.00/day across all demo users, resets at midnight UTC)
+5. When visitors add their own keys in Settings, they bypass all demo limits and get unlimited access
+
+### Setup
+
+```bash
+# .env
+DEMO_MODE=true
+DEMO_GEMINI_KEY=your-gemini-key
+DEMO_OPENAI_KEY=your-openai-key
+DEMO_ANTHROPIC_KEY=your-anthropic-key
+DEMO_DAILY_BUDGET=2.00
+DEMO_SESSION_LIMIT=10
+DEMO_IP_LIMIT=30
+```
+
+All state is in-memory (resets on server restart), which is acceptable for a demo. Rate windows are rolling (1-hour window), and the daily budget resets at midnight UTC.
 
 ## Production Deployment
 

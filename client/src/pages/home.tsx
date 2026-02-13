@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import ChatMessage from "@/components/ChatMessage";
 import ChatInput from "@/components/ChatInput";
@@ -8,14 +8,16 @@ import ProcessLog, { type LogEntry } from "@/components/ProcessLog";
 import DeepResearchModal from "@/components/DeepResearchModal";
 import ConversationSidebar from "@/components/ConversationSidebar";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { useAuth } from "@/hooks/use-auth";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { getStoredAPIKeys, hasAnyAPIKey } from "@/lib/api-keys";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Info, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
+import type { DemoStatus } from "@shared/types";
 
 interface Message {
   id: string;
@@ -42,6 +44,20 @@ export default function Home() {
   const streamingMessageRef = useRef<string>("");
 
   const showSidebar = authRequired && isAuthenticated;
+
+  // Poll demo status to know if server provides demo keys
+  const { data: demoStatus } = useQuery<DemoStatus>({
+    queryKey: ["demoStatus"],
+    queryFn: async () => {
+      const res = await fetch("/api/demo-status");
+      if (!res.ok) return { enabled: false, remainingMessages: 0, maxMessages: 0, budgetExhausted: false };
+      return res.json();
+    },
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
+
+  const demoActive = demoStatus?.enabled && !demoStatus?.budgetExhausted;
 
   // Check for API keys on mount, route change, and window focus
   useEffect(() => {
@@ -281,7 +297,10 @@ export default function Home() {
     setIsProcessing(true);
 
     const apiKeys = getStoredAPIKeys();
-    if (!hasAnyAPIKey(apiKeys)) {
+    const userHasKeys = hasAnyAPIKey(apiKeys);
+
+    // Block if no keys AND demo not active
+    if (!userHasKeys && !demoActive) {
       addLog("Error: No API keys configured. Please add at least one API key in Settings.", "error");
       setIsProcessing(false);
       return;
@@ -293,6 +312,7 @@ export default function Home() {
       return;
     }
 
+    // Send user keys if available, otherwise send empty (server injects demo keys)
     const sent = sendMessage({
       type: "analyze",
       payload: {
@@ -300,13 +320,16 @@ export default function Home() {
         conversationHistory: messages,
         conversationId,
         useDeepResearch,
-        apiKeys: apiKeys
+        apiKeys: userHasKeys ? apiKeys : { gemini: "", openai: "", anthropic: "" }
       }
     });
 
     if (!sent) {
       addLog("Failed to send analysis request", "error");
       setIsProcessing(false);
+    } else if (!userHasKeys && demoActive) {
+      // Refetch demo status after sending a demo message to update remaining count
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["demoStatus"] }), 2000);
     }
   };
 
@@ -391,7 +414,45 @@ export default function Home() {
     <div className="h-screen flex flex-col bg-background">
       <Header />
 
-      {!hasAPIKeys && (
+      {/* Demo banner or missing keys alert */}
+      {!hasAPIKeys && demoActive && (
+        <div className="px-6 pt-4">
+          <Alert data-testid="alert-demo-mode">
+            <Info className="h-4 w-4" />
+            <AlertDescription>
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1">
+                  <span className="font-medium">Demo mode</span> — {demoStatus.remainingMessages} of {demoStatus.maxMessages} messages remaining.
+                  For unlimited access, add your own API keys in{" "}
+                  <Link href="/settings" className="underline font-medium">Settings</Link>.
+                </div>
+                <div className="w-24 shrink-0">
+                  <Progress
+                    value={((demoStatus.maxMessages - demoStatus.remainingMessages) / demoStatus.maxMessages) * 100}
+                    className="h-1.5"
+                  />
+                </div>
+              </div>
+            </AlertDescription>
+          </Alert>
+        </div>
+      )}
+
+      {!hasAPIKeys && demoStatus?.enabled && demoStatus?.budgetExhausted && (
+        <div className="px-6 pt-4">
+          <Alert variant="destructive" data-testid="alert-demo-exhausted">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between">
+              <span>Demo budget exhausted for today. Add your own API keys to continue.</span>
+              <Link href="/settings">
+                <Button variant="outline" size="sm">Go to Settings</Button>
+              </Link>
+            </AlertDescription>
+          </Alert>
+        </div>
+      )}
+
+      {!hasAPIKeys && !demoStatus?.enabled && (
         <div className="px-6 pt-4">
           <Alert variant="destructive" data-testid="alert-no-api-keys">
             <AlertCircle className="h-4 w-4" />
