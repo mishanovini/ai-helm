@@ -24,6 +24,10 @@ import {
   AlertTriangle,
   Clock,
   Zap,
+  Cpu,
+  RefreshCw,
+  CheckCircle2,
+  ArrowRight,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -104,6 +108,10 @@ export default function Admin() {
             <TabsTrigger value="keys">
               <Key className="h-4 w-4 mr-1" />
               API Keys
+            </TabsTrigger>
+            <TabsTrigger value="models">
+              <Cpu className="h-4 w-4 mr-1" />
+              Models
             </TabsTrigger>
             <TabsTrigger value="settings">
               <Settings className="h-4 w-4 mr-1" />
@@ -256,6 +264,11 @@ export default function Admin() {
           {/* API Keys Tab */}
           <TabsContent value="keys">
             <ApiKeysTab apiKeys={apiKeys} />
+          </TabsContent>
+
+          {/* Models Tab */}
+          <TabsContent value="models">
+            <ModelsTab />
           </TabsContent>
 
           {/* Settings Tab */}
@@ -670,5 +683,187 @@ function SettingsTab() {
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+// ============================================================================
+// Models Tab
+// ============================================================================
+
+interface ModelStatus {
+  aliases: Record<string, string>;
+  lastReport: {
+    timestamp: string;
+    results: Array<{
+      alias: string;
+      previousModelId: string;
+      newModelId: string;
+      changed: boolean;
+    }>;
+    errors: string[];
+    hasUpdates: boolean;
+  } | null;
+}
+
+function ModelsTab() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: status, isLoading } = useQuery<ModelStatus>({
+    queryKey: ["adminModelsStatus"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/models/status");
+      if (!res.ok) throw new Error("Failed to fetch model status");
+      return res.json();
+    },
+  });
+
+  const checkMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/models/check-updates", { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(body.error || "Discovery failed");
+      }
+      return res.json();
+    },
+    onSuccess: (report) => {
+      queryClient.invalidateQueries({ queryKey: ["adminModelsStatus"] });
+      if (report.hasUpdates) {
+        const updated = report.results.filter((r: any) => r.changed);
+        toast({
+          title: "Model updates found",
+          description: `${updated.length} model(s) updated to newer versions.`,
+        });
+      } else {
+        toast({
+          title: "All models up to date",
+          description: "No new model versions were found.",
+        });
+      }
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Discovery failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const aliases = status?.aliases || {};
+  const lastReport = status?.lastReport;
+  const aliasEntries = Object.entries(aliases);
+
+  // Determine provider from alias name
+  const getProvider = (alias: string): string => {
+    if (alias.startsWith("gemini")) return "Gemini";
+    if (alias.startsWith("gpt")) return "OpenAI";
+    if (alias.startsWith("claude")) return "Anthropic";
+    return "Unknown";
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Cpu className="h-5 w-5" />
+                Model Aliases
+              </CardTitle>
+              <CardDescription>
+                Version-free aliases map to the latest provider model IDs. Auto-checked daily at noon PST.
+              </CardDescription>
+            </div>
+            <Button
+              onClick={() => checkMutation.mutate()}
+              disabled={checkMutation.isPending}
+              variant="outline"
+              size="sm"
+            >
+              <RefreshCw className={`h-4 w-4 mr-1 ${checkMutation.isPending ? "animate-spin" : ""}`} />
+              {checkMutation.isPending ? "Checking..." : "Check for Updates"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading model status...</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Alias</TableHead>
+                  <TableHead>Provider</TableHead>
+                  <TableHead>Current Model ID</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {aliasEntries.map(([alias, modelId]) => {
+                  const reportEntry = lastReport?.results?.find((r) => r.alias === alias);
+                  return (
+                    <TableRow key={alias}>
+                      <TableCell className="font-mono text-sm font-medium">{alias}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{getProvider(alias)}</Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground">{modelId}</TableCell>
+                      <TableCell>
+                        {reportEntry?.changed ? (
+                          <div className="flex items-center gap-1 text-xs text-blue-400">
+                            <ArrowRight className="h-3 w-3" />
+                            Updated from {reportEntry.previousModelId}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 text-xs text-green-400">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Current
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {lastReport && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Last Discovery</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-sm">
+              <Clock className="h-3 w-3 inline mr-1" />
+              {new Date(lastReport.timestamp).toLocaleString()}
+            </p>
+            {lastReport.hasUpdates && (
+              <p className="text-sm text-blue-400">
+                {lastReport.results.filter((r) => r.changed).length} model(s) updated
+              </p>
+            )}
+            {!lastReport.hasUpdates && (
+              <p className="text-sm text-muted-foreground">No updates found</p>
+            )}
+            {lastReport.errors.length > 0 && (
+              <div className="text-sm text-red-400">
+                {lastReport.errors.map((err, i) => (
+                  <p key={i}>
+                    <AlertTriangle className="h-3 w-3 inline mr-1" />
+                    {err}
+                  </p>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }

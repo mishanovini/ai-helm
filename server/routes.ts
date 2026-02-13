@@ -11,6 +11,8 @@ import { requireAuth, requireAdmin, isAuthRequired, parseSessionFromUpgrade } fr
 import { getDefaultRules, seedDefaultConfig, editConfigWithNaturalLanguage } from "./dynamic-router";
 import { encrypt, decrypt, isEncryptionConfigured } from "./encryption";
 import { demoBudget, isDemoMode, getDemoKeys, hasAnyDemoKey } from "./demo-budget";
+import { runDiscovery, getLastDiscoveryReport, startDiscoveryScheduler } from "./model-discovery";
+import { resolveAllAliases } from "../shared/model-aliases";
 
 /**
  * Simple in-memory rate limiter for WebSocket connections
@@ -782,6 +784,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to update settings" });
     }
   });
+
+  // ========================================================================
+  // Admin: Model Discovery
+  // ========================================================================
+
+  /** Get current model alias mappings and last discovery report */
+  app.get("/api/admin/models/status", requireAdmin, async (_req, res) => {
+    try {
+      res.json({
+        aliases: resolveAllAliases(),
+        lastReport: getLastDiscoveryReport(),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to get model status" });
+    }
+  });
+
+  /** Trigger manual model discovery check */
+  app.post("/api/admin/models/check-updates", requireAdmin, async (req, res) => {
+    try {
+      // Collect API keys: prefer demo keys, then user-provided
+      const apiKeys: { gemini?: string; openai?: string; anthropic?: string } = {};
+
+      // Try demo keys first
+      if (isDemoMode()) {
+        const demoKeys = getDemoKeys();
+        if (demoKeys.gemini) apiKeys.gemini = demoKeys.gemini;
+        if (demoKeys.openai) apiKeys.openai = demoKeys.openai;
+        if (demoKeys.anthropic) apiKeys.anthropic = demoKeys.anthropic;
+      }
+
+      // Try user's own keys if available (from encrypted DB storage)
+      if (req.user?.id) {
+        try {
+          const userKeys = await storage.listApiKeysByUser(req.user.id);
+          for (const key of userKeys) {
+            if (key.status === "approved" && key.encryptedKey) {
+              const decryptedKey = decrypt(key.encryptedKey);
+              if (!apiKeys[key.provider as keyof typeof apiKeys]) {
+                (apiKeys as any)[key.provider] = decryptedKey;
+              }
+            }
+          }
+        } catch {
+          // Non-critical: proceed with whatever keys we have
+        }
+      }
+
+      if (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic) {
+        return res.status(400).json({
+          error: "No API keys available for discovery. Configure demo keys or add your own keys.",
+        });
+      }
+
+      const report = await runDiscovery(apiKeys);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Model discovery error:", error);
+      res.status(500).json({ error: "Model discovery failed: " + error.message });
+    }
+  });
+
+  // Start model discovery scheduler if any keys are available
+  {
+    const discoveryKeys: { gemini?: string; openai?: string; anthropic?: string } = {};
+    if (isDemoMode()) {
+      const demoKeys = getDemoKeys();
+      if (demoKeys.gemini) discoveryKeys.gemini = demoKeys.gemini;
+      if (demoKeys.openai) discoveryKeys.openai = demoKeys.openai;
+      if (demoKeys.anthropic) discoveryKeys.anthropic = demoKeys.anthropic;
+    }
+    if (discoveryKeys.gemini || discoveryKeys.openai || discoveryKeys.anthropic) {
+      startDiscoveryScheduler(discoveryKeys);
+    }
+  }
 
   // ========================================================================
   // WebSocket Setup

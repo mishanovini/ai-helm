@@ -4,7 +4,7 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 ## Features
 
-**Intelligent Model Selection** - Automatically selects the optimal AI model (GPT-5, Claude 4.5, Gemini 2.5) based on task type, complexity, and cost via a configurable dynamic router.
+**Intelligent Model Selection** - Automatically selects the optimal AI model (GPT, Claude, Gemini) based on task type, complexity, and cost via a configurable dynamic router. Model versions auto-update via provider API discovery.
 
 **Consolidated Analysis Pipeline** - Single-call analysis extracts intent, sentiment, style, security risk, task type, complexity, and prompt quality in one LLM request (~75% cost reduction vs. individual calls).
 
@@ -101,12 +101,14 @@ Display to User
 
 The dynamic router evaluates rules in order. Default rules include:
 
-- **Simple tasks** - Ultra-cheap models (Gemini Flash-Lite, GPT-5 Nano)
-- **Complex coding** - Claude Sonnet 4.5 or Gemini 2.5 Pro
-- **Advanced math** - Gemini 2.5 Pro
-- **Creative writing** - Claude Opus 4.1 or Claude Sonnet 4.5
-- **Conversation** - GPT-5
-- **Large context (>200K tokens)** - Gemini 2.5 Pro (1M token window)
+- **Simple tasks** - Ultra-cheap models (Gemini Flash-Lite, GPT Nano)
+- **Complex coding** - Claude Sonnet or Gemini Pro
+- **Advanced math** - Gemini Pro
+- **Creative writing** - Claude Opus or Claude Sonnet
+- **Conversation** - GPT
+- **Large context (>200K tokens)** - Gemini Pro (1M token window)
+
+Model versions are automatically discovered from provider APIs (checked daily at noon PST). The codebase uses version-free aliases (e.g., "gemini-pro" instead of "gemini-2.5-pro") that resolve to the latest available version at runtime. Admins can trigger manual model checks from the Admin Console > Models tab.
 
 Rules are fully customizable via the Router page, including natural language editing.
 
@@ -130,10 +132,12 @@ ai-helm/
 |   |-- response-generator.ts  # Multi-provider streaming
 |   |-- encryption.ts          # AES-256-GCM for API keys
 |   |-- demo-budget.ts         # Demo mode rate limiter + budget tracker
+|   |-- model-discovery.ts     # Auto-discovery of latest model versions
 |   |-- db.ts                  # Database connection (lazy init)
 |-- shared/                    # Shared between client and server
 |   |-- schema.ts              # 11-table Drizzle schema + Zod validation
 |   |-- types.ts               # Shared TypeScript interfaces
+|   |-- model-aliases.ts       # Version-free alias registry + resolution
 |   |-- model-selection.ts     # Model catalog + decision tree
 |   |-- curriculum.ts          # Learning system lessons
 |-- tests/                     # Vitest test suite
@@ -242,6 +246,8 @@ See the [Demo Mode](#demo-mode) section below for details.
 - `GET /api/admin/api-keys` - API key management
 - `PATCH /api/admin/api-keys/:id` - Approve/reject keys
 - `PATCH /api/admin/settings` - Update org settings
+- `GET /api/admin/models/status` - Current model alias mappings + last discovery report
+- `POST /api/admin/models/check-updates` - Trigger manual model discovery
 
 ### WebSocket
 - `ws://localhost:5000/ws` - Analysis pipeline streaming + chat
@@ -262,6 +268,7 @@ Test coverage includes:
 - **Encryption** (9 tests) - round-trip, random IV, unicode, tampering detection
 - **Consolidated analysis** (33 tests) - schema validation, security regex patterns, JSON parsing
 - **Demo budget** (23 tests) - per-session and per-IP rate limiting, daily budget cap, midnight reset, status reporting
+- **Model aliases & discovery** (35 tests) - alias registry, pattern matching, resolution, reverse lookup, update/reset
 
 ## Demo Mode
 

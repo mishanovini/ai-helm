@@ -18,6 +18,7 @@ import {
   type ModelOption,
   type AvailableProviders,
 } from "../shared/model-selection";
+import { resolveAlias, getModelFamily } from "../shared/model-aliases";
 import type { RouterRule, ConsolidatedAnalysisResult, APIKeys } from "../shared/types";
 import type { RouterConfig as DBRouterConfig } from "@shared/schema";
 
@@ -36,10 +37,13 @@ export interface RouterResult {
 }
 
 /**
- * Resolve a model ID from the catalog, filtering by available providers
+ * Resolve a model ID (or alias) from the catalog, filtering by available providers.
+ * Supports both aliases ("gemini-pro") and raw model IDs ("gemini-2.5-pro").
  */
-function resolveModel(modelId: string, availableProviders: AvailableProviders): ModelOption | null {
-  const model = MODEL_CATALOG.find(m => m.model === modelId);
+function resolveModel(modelIdOrAlias: string, availableProviders: AvailableProviders): ModelOption | null {
+  // If it's an alias, resolve to the current model ID first
+  const resolvedId = getModelFamily(modelIdOrAlias) ? resolveAlias(modelIdOrAlias) : modelIdOrAlias;
+  const model = MODEL_CATALOG.find(m => m.model === resolvedId);
   if (!model) return null;
   if (!availableProviders[model.provider]) return null;
   return model;
@@ -168,11 +172,11 @@ export function getDefaultRules(): { rules: RouterRule[]; catchAll: string[] } {
           complexity: ["simple"],
         },
         modelPriority: [
-          "gemini-2.5-flash-lite",
-          "gpt-5-nano",
-          "gemini-2.5-flash",
-          "gpt-5-mini",
-          "claude-haiku-4-5",
+          "gemini-flash-lite",
+          "gpt-nano",
+          "gemini-flash",
+          "gpt-mini",
+          "claude-haiku",
         ],
         reasoning: "Cost-efficient models for simple tasks",
       },
@@ -185,13 +189,13 @@ export function getDefaultRules(): { rules: RouterRule[]; catchAll: string[] } {
           complexity: ["moderate", "complex"],
         },
         modelPriority: [
-          "claude-sonnet-4-5",
-          "gemini-2.5-pro",
-          "claude-haiku-4-5",
-          "gpt-5",
-          "gemini-2.5-flash",
+          "claude-sonnet",
+          "gemini-pro",
+          "claude-haiku",
+          "gpt",
+          "gemini-flash",
         ],
-        reasoning: "Claude Sonnet excels at complex coding (77.2% SWE-bench)",
+        reasoning: "Claude Sonnet excels at complex coding",
       },
       {
         id: "default-math",
@@ -202,11 +206,11 @@ export function getDefaultRules(): { rules: RouterRule[]; catchAll: string[] } {
           complexity: ["moderate", "complex"],
         },
         modelPriority: [
-          "gemini-2.5-pro",
-          "claude-opus-4-1",
-          "gpt-5",
+          "gemini-pro",
+          "claude-opus",
+          "gpt",
         ],
-        reasoning: "Gemini 2.5 Pro leads in math reasoning (86.7% AIME)",
+        reasoning: "Gemini Pro leads in math reasoning",
       },
       {
         id: "default-creative",
@@ -217,10 +221,10 @@ export function getDefaultRules(): { rules: RouterRule[]; catchAll: string[] } {
           complexity: ["moderate", "complex"],
         },
         modelPriority: [
-          "claude-opus-4-1",
-          "claude-sonnet-4-5",
-          "gpt-5",
-          "gemini-2.5-pro",
+          "claude-opus",
+          "claude-sonnet",
+          "gpt",
+          "gemini-pro",
         ],
         reasoning: "Claude models excel at style-preserving creative content",
       },
@@ -233,10 +237,10 @@ export function getDefaultRules(): { rules: RouterRule[]; catchAll: string[] } {
           complexity: ["moderate", "complex"],
         },
         modelPriority: [
-          "gemini-2.5-pro",
-          "claude-opus-4-1",
-          "gpt-5",
-          "claude-sonnet-4-5",
+          "gemini-pro",
+          "claude-opus",
+          "gpt",
+          "claude-sonnet",
         ],
         reasoning: "Premium models for complex analytical tasks",
       },
@@ -248,21 +252,21 @@ export function getDefaultRules(): { rules: RouterRule[]; catchAll: string[] } {
           taskTypes: ["conversation"],
         },
         modelPriority: [
-          "gpt-5",
-          "claude-sonnet-4-5",
-          "gemini-2.5-flash",
+          "gpt",
+          "claude-sonnet",
+          "gemini-flash",
         ],
-        reasoning: "GPT-5 provides natural, engaging dialogue",
+        reasoning: "GPT provides natural, engaging dialogue",
       },
     ],
     catchAll: [
-      "gemini-2.5-flash",
-      "gpt-5-mini",
-      "gemini-2.5-flash-lite",
-      "gpt-5-nano",
-      "claude-haiku-4-5",
-      "gpt-5",
-      "gemini-2.5-pro",
+      "gemini-flash",
+      "gpt-mini",
+      "gemini-flash-lite",
+      "gpt-nano",
+      "claude-haiku",
+      "gpt",
+      "gemini-pro",
     ],
   };
 }
