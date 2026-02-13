@@ -60,7 +60,7 @@ npm run db:push
 npm run dev
 ```
 
-The application will be available at `http://localhost:5000`.
+The application will be available at `http://localhost:3000`.
 
 ### First-Time Setup
 
@@ -188,7 +188,7 @@ GITHUB_CLIENT_SECRET=your-github-client-secret
 ENCRYPTION_KEY=64-char-hex-string
 
 # Server
-PORT=5000
+PORT=3000
 NODE_ENV=development
 ```
 
@@ -250,7 +250,7 @@ See the [Demo Mode](#demo-mode) section below for details.
 - `POST /api/admin/models/check-updates` - Trigger manual model discovery
 
 ### WebSocket
-- `ws://localhost:5000/ws` - Analysis pipeline streaming + chat
+- `ws://localhost:3000/ws` - Analysis pipeline streaming + chat
 
 ## Testing
 
