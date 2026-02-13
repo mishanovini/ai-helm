@@ -333,11 +333,53 @@ export default function Home() {
     }
   };
 
-  const handleSendMessage = async (content: string) => {
-    const shouldUseDeepResearch = content.toLowerCase().includes("deep") ||
-                                   content.toLowerCase().includes("research") ||
-                                   Math.random() > 0.8;
+  /**
+   * Determines whether a prompt warrants deep research mode.
+   * Uses heuristic signals: word count, multi-part structure, explicit research
+   * intent, and presence of complex analytical keywords.
+   */
+  const shouldPromptDeepResearch = (text: string): boolean => {
+    const lower = text.toLowerCase();
+    const words = text.split(/\s+/).filter(Boolean);
+    const wordCount = words.length;
 
+    // Short prompts never trigger deep research
+    if (wordCount < 30) return false;
+
+    let signals = 0;
+
+    // Long, detailed prompts suggest complex research needs
+    if (wordCount > 100) signals += 2;
+    else if (wordCount > 60) signals += 1;
+
+    // Multi-part requests (numbered lists, bullet points, semicolons)
+    const hasMultipleParts = /(\d+[\.\)]\s)|(\n\s*[-•*]\s)|(;\s*\w)/.test(text);
+    if (hasMultipleParts) signals += 1;
+
+    // Explicit deep research intent
+    const deepResearchPattern = /\b(deep\s*(?:dive|research|analysis|investigation)|comprehensive\s*(?:review|analysis|study)|thorough(?:ly)?\s*(?:analyze|research|investigate|examine))\b/i;
+    if (deepResearchPattern.test(text)) signals += 2;
+
+    // Complex analytical keywords (need multiple to count)
+    const analyticalTerms = [
+      "compare", "contrast", "evaluate", "synthesize", "implications",
+      "trade-offs", "tradeoffs", "pros and cons", "advantages", "disadvantages",
+      "literature", "sources", "citations", "evidence", "methodology",
+      "systematic", "comprehensive", "in-depth", "exhaustive"
+    ];
+    const matchCount = analyticalTerms.filter(term => lower.includes(term)).length;
+    if (matchCount >= 3) signals += 2;
+    else if (matchCount >= 2) signals += 1;
+
+    // Multiple explicit questions suggest a research task
+    const questionCount = (text.match(/\?/g) || []).length;
+    if (questionCount >= 3) signals += 1;
+
+    // Require at least 3 signals to suggest deep research
+    return signals >= 3;
+  };
+
+  const handleSendMessage = async (content: string) => {
     const timestamp = new Date().toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
@@ -351,7 +393,7 @@ export default function Home() {
       timestamp
     }]);
 
-    if (shouldUseDeepResearch) {
+    if (shouldPromptDeepResearch(content)) {
       setPendingMessage(content);
       setShowDeepResearchModal(true);
     } else {
@@ -422,9 +464,10 @@ export default function Home() {
             <AlertDescription>
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1">
-                  <span className="font-medium">Demo mode</span> — {demoStatus.remainingMessages} of {demoStatus.maxMessages} messages remaining.
-                  For unlimited access, add your own API keys in{" "}
-                  <Link href="/settings" className="underline font-medium">Settings</Link>.
+                  <span className="font-medium text-primary">Demo Mode</span> — Responses are limited ({demoStatus.remainingMessages} of {demoStatus.maxMessages} remaining).
+                  Add your own API keys in{" "}
+                  <Link href="/settings" className="underline font-medium text-primary">Settings</Link>
+                  {" "}for unlimited access.
                 </div>
                 <div className="w-24 shrink-0">
                   <Progress
@@ -443,7 +486,7 @@ export default function Home() {
           <Alert variant="destructive" data-testid="alert-demo-exhausted">
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription className="flex items-center justify-between">
-              <span>Demo budget exhausted for today. Add your own API keys to continue.</span>
+              <span>Demo budget exhausted for today. Add your own API keys in Settings for unlimited access.</span>
               <Link href="/settings">
                 <Button variant="outline" size="sm">Go to Settings</Button>
               </Link>
@@ -458,7 +501,7 @@ export default function Home() {
             <AlertCircle className="h-4 w-4" />
             <AlertDescription className="flex items-center justify-between">
               <span>
-                No API keys configured. Please add at least one AI provider API key to use the application.
+                Please add at least one AI provider API key to use the application.
               </span>
               <Link href="/settings">
                 <Button variant="outline" size="sm" data-testid="button-go-to-settings">
