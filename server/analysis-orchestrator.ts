@@ -9,8 +9,10 @@ import {
   selectOptimalModel,
   selectCheapestModel,
   estimateCost,
+  MODEL_CATALOG,
   AvailableProviders,
-  ModelOption
+  ModelOption,
+  type CostTier,
 } from "../shared/model-selection";
 import { evaluateRules } from "./dynamic-router";
 import { generateResponse, generateResponseStream } from "./response-generator";
@@ -63,6 +65,9 @@ export async function runAnalysisJob(
       openai: !!apiKeys.openai,
       anthropic: !!apiKeys.anthropic
     };
+
+    // Build list of models available with the user's API keys (used for retry upgrades)
+    const availableModels = MODEL_CATALOG.filter(m => providers[m.provider]);
 
     const analysisModel = selectCheapestModel(providers);
 
@@ -207,7 +212,11 @@ export async function runAnalysisJob(
         results.fallbackModel = routerResult.fallback;
         results.routerRuleMatched = routerResult.matchedRuleId;
       } else {
-        const selection = selectOptimalModel(fullContext, availableProviders);
+        // Pass LLM-derived taskType and complexity to avoid keyword-only detection
+        const selection = selectOptimalModel(fullContext, availableProviders, {
+          taskType: analysis.taskType,
+          complexity: analysis.complexity,
+        });
         results.selectedModel = selection.primary;
         results.modelReasoning = selection.reasoning;
         results.fallbackModel = selection.fallback;
@@ -285,65 +294,46 @@ export async function runAnalysisJob(
     }
 
     // ========================================================================
-    // Phase 5: Generate AI Response
+    // Phase 5+6: Generate AI Response with Validation Retry
     // ========================================================================
+    // If validation detects a poor response (refusal, off-topic, etc.),
+    // retry once with a more capable model and adjusted parameters.
 
+    const MAX_RETRIES = 1;
     let aiResponse = "";
-    sendUpdate("generating", "processing");
-    try {
-      const selectedModel: ModelOption = results.selectedModel;
+    let currentModel: ModelOption = results.selectedModel;
+    let currentParameters = { ...results.parameters };
+    let retryCount = 0;
 
-      // Use streaming to push tokens to client in real time
-      aiResponse = await generateResponseStream(
-        results.optimizedPrompt,
-        conversationHistory,
-        selectedModel.provider,
-        selectedModel.model,
-        results.parameters,
-        apiKeys,
-        (token: string) => {
-          sendUpdate("response_chunk", "processing", { token });
-        },
-        job.signal
-      );
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // --- Phase 5: Generate ---
+      aiResponse = "";
+      sendUpdate("generating", "processing");
+      try {
+        aiResponse = await generateResponseStream(
+          results.optimizedPrompt,
+          conversationHistory,
+          currentModel.provider,
+          currentModel.model,
+          currentParameters,
+          apiKeys,
+          (token: string) => {
+            sendUpdate("response_chunk", "processing", { token });
+          },
+          job.signal
+        );
 
-      sendUpdate("generating", "completed", {
-        message: `Response generated using ${selectedModel.displayName} (${results.estimatedCost.displayText})`
-      });
-      // Send final complete response (client uses this to finalize the message)
-      sendUpdate("response", "completed", { response: aiResponse });
-
-      // Save assistant response to DB if authenticated
-      if (job.userId && job.conversationId) {
-        try {
-          await storage.createMessage({
-            conversationId: job.conversationId,
-            role: "assistant",
-            content: aiResponse,
-          });
-          // Update conversation title from intent if it's still null
-          const conv = await storage.getConversation(job.conversationId);
-          if (conv && !conv.title) {
-            const title = analysis.intent.length > 60
-              ? analysis.intent.substring(0, 57) + "..."
-              : analysis.intent;
-            await storage.updateConversationTitle(job.conversationId, title);
-          }
-        } catch {
-          // Non-critical
-        }
+        sendUpdate("generating", "completed", {
+          message: `Response generated using ${currentModel.displayName} (${results.estimatedCost.displayText})`
+        });
+      } catch (error: any) {
+        sendUpdate("generating", "error", undefined, error.message);
+        sendUpdate("response", "error", undefined, error.message);
+        hasError = true;
+        break;
       }
-    } catch (error: any) {
-      sendUpdate("generating", "error", undefined, error.message);
-      sendUpdate("response", "error", undefined, error.message);
-      hasError = true;
-    }
 
-    // ========================================================================
-    // Phase 6: Response Validation
-    // ========================================================================
-
-    if (!hasError && aiResponse) {
+      // --- Phase 6: Validate ---
       sendUpdate("validating", "processing");
       try {
         const validation = await validateResponse(
@@ -353,23 +343,102 @@ export async function runAnalysisJob(
           analysisModel,
           analysisApiKey
         );
-        sendUpdate("validating", "completed", {
-          userSummary: validation.userSummary,
-          validation: validation.validation
-        });
 
-        sendUpdate("complete", "completed", {
-          userSummary: validation.userSummary,
-          validation: validation.validation
+        if (validation.passed || attempt === MAX_RETRIES) {
+          // Accept this response — either it passed or we've exhausted retries
+          sendUpdate("validating", "completed", {
+            userSummary: validation.userSummary,
+            validation: validation.validation,
+            passed: validation.passed,
+            failReason: validation.failReason,
+          });
+
+          // Send final response
+          sendUpdate("response", "completed", { response: aiResponse });
+          sendUpdate("complete", "completed", {
+            userSummary: validation.userSummary,
+            validation: validation.validation,
+          });
+          break;
+        }
+
+        // Response failed validation — try to upgrade model
+        const upgradeModel = selectUpgradeModel(currentModel, availableModels);
+        if (!upgradeModel || upgradeModel.model === currentModel.model) {
+          // No better model available — accept current response
+          sendUpdate("validating", "completed", {
+            userSummary: validation.userSummary,
+            validation: validation.validation,
+            passed: false,
+            failReason: validation.failReason,
+          });
+          sendUpdate("response", "completed", { response: aiResponse });
+          sendUpdate("complete", "completed", {
+            userSummary: validation.userSummary,
+            validation: validation.validation,
+          });
+          break;
+        }
+
+        // Notify client of retry and clear streamed response
+        retryCount++;
+        sendUpdate("retrying", "processing", {
+          reason: validation.validation,
+          failReason: validation.failReason,
+          previousModel: currentModel.displayName,
+          nextModel: upgradeModel.displayName,
         });
+        sendUpdate("response_clear", "processing");
+
+        // Upgrade model and bump temperature slightly for diversity
+        currentModel = upgradeModel;
+        currentParameters = {
+          ...currentParameters,
+          temperature: Math.min(currentParameters.temperature + 0.2, 1.0),
+        };
+
+        // Recalculate cost estimate for the new model
+        const estimatedInputTokens = Math.ceil(
+          (results.optimizedPrompt.length + conversationHistory.reduce((sum, m) => sum + m.content.length, 0)) / 4
+        );
+        results.estimatedCost = estimateCost(currentModel, estimatedInputTokens, 500);
+
       } catch (error: any) {
+        // Validation failed to run — accept the response as-is
         sendUpdate("validating", "error", undefined, error.message);
+        sendUpdate("response", "completed", { response: aiResponse });
         sendUpdate("complete", "completed");
+        break;
       }
-    } else if (hasError) {
+    }
+
+    // Track which model actually generated the final response
+    results.finalModel = currentModel;
+    results.retryCount = retryCount;
+
+    // Save assistant response to DB if authenticated
+    if (!hasError && aiResponse && job.userId && job.conversationId) {
+      try {
+        await storage.createMessage({
+          conversationId: job.conversationId,
+          role: "assistant",
+          content: aiResponse,
+        });
+        // Update conversation title from intent if it's still null
+        const conv = await storage.getConversation(job.conversationId);
+        if (conv && !conv.title) {
+          const title = analysis.intent.length > 60
+            ? analysis.intent.substring(0, 57) + "..."
+            : analysis.intent;
+          await storage.updateConversationTitle(job.conversationId, title);
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+
+    if (hasError) {
       sendUpdate("complete", "error", undefined, "Analysis completed with errors");
-    } else {
-      sendUpdate("complete", "completed");
     }
 
     // ========================================================================
@@ -428,4 +497,34 @@ export async function runAnalysisJob(
     sendUpdate("complete", "error", undefined, "Analysis job failed");
     return undefined;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Cost tier ordering for model upgrades */
+const COST_TIER_ORDER: Record<CostTier, number> = {
+  "ultra-low": 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  premium: 4,
+};
+
+/**
+ * Select a more capable model from available models by upgrading to the next
+ * cost tier. Returns null if no upgrade is available.
+ */
+function selectUpgradeModel(
+  currentModel: ModelOption,
+  availableModels: ModelOption[]
+): ModelOption | null {
+  const currentTier = COST_TIER_ORDER[currentModel.costTier] ?? 0;
+
+  const upgrades = availableModels
+    .filter(m => (COST_TIER_ORDER[m.costTier] ?? 0) > currentTier)
+    .sort((a, b) => (COST_TIER_ORDER[a.costTier] ?? 0) - (COST_TIER_ORDER[b.costTier] ?? 0));
+
+  return upgrades[0] || null;
 }

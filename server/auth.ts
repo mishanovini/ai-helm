@@ -236,12 +236,33 @@ export const requireAuth: RequestHandler = (req, res, next) => {
 };
 
 /**
+ * Verify whether the provided admin secret matches the configured ADMIN_SECRET.
+ * Returns false if ADMIN_SECRET is not configured.
+ */
+export function verifyAdminSecret(secret: string): boolean {
+  const configured = process.env.ADMIN_SECRET;
+  if (!configured) return false;
+  return secret === configured;
+}
+
+/**
  * Middleware: require admin role. Returns 403 if not admin.
- * When REQUIRE_AUTH is false, this middleware is a no-op.
+ *
+ * When REQUIRE_AUTH is false, also accepts a valid `x-admin-secret` header
+ * so the admin console is accessible in demo/no-auth mode via a shared secret.
  */
 export const requireAdmin: RequestHandler = (req, res, next) => {
+  // When auth is disabled, check for admin secret header
   if (!isAuthRequired()) {
-    return next();
+    const secret = req.headers["x-admin-secret"] as string | undefined;
+    if (secret && verifyAdminSecret(secret)) {
+      return next();
+    }
+    // Also allow if no ADMIN_SECRET is configured (fully open dev mode)
+    if (!process.env.ADMIN_SECRET) {
+      return next();
+    }
+    return res.status(403).json({ error: "Admin secret required" });
   }
   if (!req.isAuthenticated()) {
     return res.status(401).json({ error: "Authentication required" });

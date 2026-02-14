@@ -245,6 +245,20 @@ export default function Home() {
           : m
       ));
       streamingMessageRef.current = "";
+    } else if (phase === "retrying" && status === "processing") {
+      // Response failed quality check — server is retrying with a better model
+      addLog(
+        `Quality check failed (${payload.failReason || "unknown"}). Retrying with ${payload.nextModel}...`,
+        "processing"
+      );
+    } else if (phase === "response_clear" && status === "processing") {
+      // Clear the current streamed response for a fresh retry
+      streamingMessageRef.current = "";
+      setMessages(prev => prev.map(m =>
+        m.id === "assistant-streaming"
+          ? { ...m, content: "" }
+          : m
+      ));
     } else if (phase === "cancelled" && status === "completed") {
       addLog("Generation cancelled by user", "info");
       // Keep whatever was streamed so far, finalize the message
@@ -393,7 +407,23 @@ export default function Home() {
       timestamp
     }]);
 
-    if (shouldPromptDeepResearch(content)) {
+    // Use LLM to classify whether deep research is warranted, with heuristic fallback
+    let needsDeepResearch = false;
+    try {
+      const classifyKeys = getStoredAPIKeys();
+      const response = await fetch("/api/classify-research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: content, apiKeys: classifyKeys }),
+      });
+      const data = await response.json();
+      needsDeepResearch = data.deepResearch === true;
+    } catch {
+      // LLM classify failed — fall back to heuristic
+      needsDeepResearch = shouldPromptDeepResearch(content);
+    }
+
+    if (needsDeepResearch) {
       setPendingMessage(content);
       setShowDeepResearchModal(true);
     } else {

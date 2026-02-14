@@ -75,9 +75,18 @@ async function generateGeminiResponse(
 ): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
 
+  // Build multi-turn contents array (Gemini uses "model" role, not "assistant")
+  const contents = [
+    ...conversationHistory.map(msg => ({
+      role: msg.role === "assistant" ? "model" as const : "user" as const,
+      parts: [{ text: msg.content }],
+    })),
+    { role: "user" as const, parts: [{ text: prompt }] },
+  ];
+
   const response = await ai.models.generateContent({
     model: model,
-    contents: prompt,
+    contents,
     config: {
       temperature: parameters.temperature,
       topP: parameters.top_p,
@@ -150,7 +159,7 @@ async function generateAnthropicResponse(
 
 async function streamGeminiResponse(
   prompt: string,
-  _conversationHistory: ConversationMessage[],
+  conversationHistory: ConversationMessage[],
   model: string,
   parameters: ParameterTuning,
   apiKey: string,
@@ -159,9 +168,18 @@ async function streamGeminiResponse(
 ): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
 
+  // Build multi-turn contents array (Gemini uses "model" role, not "assistant")
+  const contents = [
+    ...conversationHistory.map(msg => ({
+      role: msg.role === "assistant" ? "model" as const : "user" as const,
+      parts: [{ text: msg.content }],
+    })),
+    { role: "user" as const, parts: [{ text: prompt }] },
+  ];
+
   const response = await ai.models.generateContentStream({
     model,
-    contents: prompt,
+    contents,
     config: {
       temperature: parameters.temperature,
       topP: parameters.top_p,

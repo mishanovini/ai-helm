@@ -1,41 +1,168 @@
-import { useState, useEffect } from "react";
+/**
+ * Settings Page — API Key Management
+ *
+ * Allows users to configure API keys for Gemini, OpenAI, and Anthropic.
+ * Keys are stored in browser localStorage only (never server-side).
+ *
+ * Security features:
+ * - Validates all keys against provider APIs before saving
+ * - Blocks save if any key fails validation
+ * - Per-key inline validation on blur with debounce
+ * - Previously-saved keys display masked; Show button only works for freshly-entered keys
+ */
+
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Settings as SettingsIcon, Key, AlertCircle, CheckCircle2, ArrowLeft } from "lucide-react";
+import {
+  Settings as SettingsIcon,
+  Key,
+  AlertCircle,
+  CheckCircle2,
+  ArrowLeft,
+  XCircle,
+  Loader2,
+  Lock,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getStoredAPIKeys, saveAPIKeys, clearAPIKeys, hasAnyAPIKey, type APIKeys } from "@/lib/api-keys";
 import { ProgressCard } from "@/components/PromptProgressWidget";
 import { useAuth } from "@/hooks/use-auth";
 
+type Provider = "gemini" | "openai" | "anthropic";
+
+interface ValidationState {
+  status: "idle" | "validating" | "valid" | "invalid";
+  error?: string;
+}
+
+/** Mask a key for display, showing only first 4 and last 4 characters */
+function maskKey(key: string): string {
+  if (!key || key.length < 8) return "••••••••";
+  return key.slice(0, 4) + "••••" + key.slice(-4);
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const { isAuthenticated, authRequired } = useAuth();
+
+  // The actual key values (real text when fresh, real text from storage when loaded)
   const [keys, setKeys] = useState<APIKeys>({
     gemini: "",
     openai: "",
     anthropic: "",
   });
+
+  // Track which keys were just entered in this session (vs loaded from storage)
+  const [freshKeys, setFreshKeys] = useState({
+    gemini: false,
+    openai: false,
+    anthropic: false,
+  });
+
+  // Show/hide toggle per key — only functional for fresh keys
   const [showKeys, setShowKeys] = useState({
     gemini: false,
     openai: false,
     anthropic: false,
   });
+
+  // Per-key inline validation status
+  const [keyStatus, setKeyStatus] = useState<Record<Provider, ValidationState>>({
+    gemini: { status: "idle" },
+    openai: { status: "idle" },
+    anthropic: { status: "idle" },
+  });
+
   const [isValidating, setIsValidating] = useState(false);
 
+  // Debounce timers for inline validation
+  const debounceTimers = useRef<Record<Provider, NodeJS.Timeout | null>>({
+    gemini: null,
+    openai: null,
+    anthropic: null,
+  });
+
   useEffect(() => {
-    // Load API keys from localStorage
     const storedKeys = getStoredAPIKeys();
     if (storedKeys) {
       setKeys(storedKeys);
+      // All loaded keys are NOT fresh — they display masked
     }
   }, []);
 
+  /** Validate a single key against its provider API */
+  const validateSingleKey = useCallback(async (provider: Provider, key: string) => {
+    if (!key.trim()) {
+      setKeyStatus(prev => ({ ...prev, [provider]: { status: "idle" } }));
+      return;
+    }
+
+    setKeyStatus(prev => ({ ...prev, [provider]: { status: "validating" } }));
+
+    try {
+      const response = await fetch("/api/validate-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, key }),
+      });
+      const data = await response.json();
+
+      setKeyStatus(prev => ({
+        ...prev,
+        [provider]: data.valid
+          ? { status: "valid" }
+          : { status: "invalid", error: data.error || "Invalid key" },
+      }));
+    } catch {
+      setKeyStatus(prev => ({
+        ...prev,
+        [provider]: { status: "invalid", error: "Validation unavailable" },
+      }));
+    }
+  }, []);
+
+  /** Handle key input change — mark as fresh and schedule inline validation */
+  const handleKeyChange = useCallback((provider: Provider, value: string) => {
+    setKeys(prev => ({ ...prev, [provider]: value }));
+    setFreshKeys(prev => ({ ...prev, [provider]: true }));
+
+    // Reset validation status on change
+    setKeyStatus(prev => ({ ...prev, [provider]: { status: "idle" } }));
+
+    // Clear existing debounce timer
+    if (debounceTimers.current[provider]) {
+      clearTimeout(debounceTimers.current[provider]!);
+    }
+
+    // Schedule inline validation after 500ms
+    if (value.trim()) {
+      debounceTimers.current[provider] = setTimeout(() => {
+        validateSingleKey(provider, value);
+      }, 500);
+    }
+  }, [validateSingleKey]);
+
+  /** Handle blur — trigger immediate validation if key is non-empty */
+  const handleKeyBlur = useCallback((provider: Provider) => {
+    const key = keys[provider];
+    if (key.trim() && freshKeys[provider]) {
+      // Clear debounce and validate immediately on blur
+      if (debounceTimers.current[provider]) {
+        clearTimeout(debounceTimers.current[provider]!);
+      }
+      validateSingleKey(provider, key);
+    }
+  }, [keys, freshKeys, validateSingleKey]);
+
+  /** Save handler — validates ALL keys BEFORE saving */
   const handleSave = async () => {
-    // Validate at least one key is provided
     if (!hasAnyAPIKey(keys)) {
       toast({
         title: "No API Keys",
@@ -45,18 +172,12 @@ export default function Settings() {
       return;
     }
 
-    // Save keys to localStorage immediately (local-first approach)
-    saveAPIKeys(keys);
-
     setIsValidating(true);
 
     try {
-      // Validate API keys with the backend
-      const response = await fetch('/api/validate-keys', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      const response = await fetch("/api/validate-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(keys),
       });
 
@@ -64,57 +185,62 @@ export default function Settings() {
 
       if (!response.ok) {
         toast({
-          title: "Keys Saved (Validation Failed)",
-          description: "Keys saved locally, but validation failed. You can try using them anyway.",
-          variant: "default",
+          title: "Validation Failed",
+          description: "Could not validate your API keys. Please try again.",
+          variant: "destructive",
         });
         return;
       }
 
-      // Check validation results
       const { valid, results } = data;
 
+      // Update per-key status from bulk validation
+      const providers: Provider[] = ["gemini", "openai", "anthropic"];
+      const newStatus = { ...keyStatus };
+      for (const p of providers) {
+        if (keys[p]) {
+          newStatus[p] = results[p]?.valid
+            ? { status: "valid" }
+            : { status: "invalid", error: results[p]?.error || "Invalid key" };
+        }
+      }
+      setKeyStatus(newStatus);
+
       if (!valid) {
-        // Build warning message based on validation results
-        let errorMessage = '';
-        
-        if (results.gemini && !results.gemini.valid) {
-          errorMessage = `Gemini: ${results.gemini.error || 'Invalid key'}`;
-        }
-        
-        if (results.openai && keys.openai && !results.openai.valid) {
-          errorMessage += (errorMessage ? '\n' : '') + `OpenAI: ${results.openai.error || 'Invalid key'}`;
-        }
-        
-        if (results.anthropic && keys.anthropic && !results.anthropic.valid) {
-          errorMessage += (errorMessage ? '\n' : '') + `Anthropic: ${results.anthropic.error || 'Invalid key'}`;
-        }
+        // Build error message listing which keys failed
+        const failures = providers
+          .filter(p => keys[p] && results[p] && !results[p].valid)
+          .map(p => `${p.charAt(0).toUpperCase() + p.slice(1)}: ${results[p].error || "Invalid key"}`);
 
         toast({
-          title: "Keys Saved (Validation Warning)",
-          description: errorMessage || "Keys saved, but some may be invalid. You can still try using them.",
-          variant: "default",
+          title: "Invalid API Keys",
+          description: failures.join(". ") || "One or more keys failed validation.",
+          variant: "destructive",
         });
-        return;
+        return; // DO NOT save
       }
 
-      // All validations passed
-      // Build success message
-      const validKeys = [];
-      if (results.gemini?.valid) validKeys.push('Gemini');
-      if (results.openai?.valid) validKeys.push('OpenAI');
-      if (results.anthropic?.valid) validKeys.push('Anthropic');
+      // All provided keys passed — now save
+      saveAPIKeys(keys);
+
+      // After saving, mark all keys as no longer fresh (they're now stored)
+      setFreshKeys({ gemini: false, openai: false, anthropic: false });
+      setShowKeys({ gemini: false, openai: false, anthropic: false });
+
+      const validKeys = providers.filter(p => results[p]?.valid).map(
+        p => p.charAt(0).toUpperCase() + p.slice(1)
+      );
 
       toast({
         title: "API Keys Validated & Saved",
-        description: `Successfully validated and saved: ${validKeys.join(', ')}`,
+        description: `Successfully validated and saved: ${validKeys.join(", ")}`,
       });
     } catch (error: any) {
-      console.error('API key validation error:', error);
+      console.error("API key validation error:", error);
       toast({
-        title: "Keys Saved (Validation Unavailable)",
-        description: "Keys saved locally, but couldn't validate. You can try using them anyway.",
-        variant: "default",
+        title: "Validation Error",
+        description: "Could not connect to the validation service. Please try again.",
+        variant: "destructive",
       });
     } finally {
       setIsValidating(false);
@@ -122,13 +248,16 @@ export default function Settings() {
   };
 
   const handleClear = () => {
-    setKeys({
-      gemini: "",
-      openai: "",
-      anthropic: "",
+    setKeys({ gemini: "", openai: "", anthropic: "" });
+    setFreshKeys({ gemini: false, openai: false, anthropic: false });
+    setShowKeys({ gemini: false, openai: false, anthropic: false });
+    setKeyStatus({
+      gemini: { status: "idle" },
+      openai: { status: "idle" },
+      anthropic: { status: "idle" },
     });
     clearAPIKeys();
-    
+
     toast({
       title: "API Keys Cleared",
       description: "All API keys have been removed from your browser.",
@@ -136,6 +265,91 @@ export default function Settings() {
   };
 
   const hasKeys = hasAnyAPIKey(keys);
+
+  /** Render a single API key input row with validation indicators and show/hide */
+  const renderKeyInput = (
+    provider: Provider,
+    label: string,
+    recommended: boolean,
+    helpUrl: string,
+    helpLabel: string,
+  ) => {
+    const isFresh = freshKeys[provider];
+    const status = keyStatus[provider];
+    const keyValue = keys[provider];
+    const isShowing = showKeys[provider];
+
+    // For non-fresh keys, display masked value in the input
+    const displayValue = isFresh ? keyValue : (keyValue ? maskKey(keyValue) : "");
+
+    return (
+      <div className="space-y-2 mb-4" key={provider}>
+        <Label htmlFor={`${provider}-key`} className="flex items-center gap-2">
+          <Key className="h-4 w-4" />
+          {label}
+          <span className="text-xs text-muted-foreground">
+            ({recommended ? "Recommended" : "Optional"})
+          </span>
+          {/* Inline validation indicator */}
+          {status.status === "validating" && (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground ml-1" />
+          )}
+          {status.status === "valid" && (
+            <CheckCircle2 className="h-4 w-4 text-green-500 ml-1" />
+          )}
+          {status.status === "invalid" && (
+            <span className="flex items-center gap-1 ml-1" title={status.error}>
+              <XCircle className="h-4 w-4 text-red-500" />
+              <span className="text-xs text-red-500">{status.error}</span>
+            </span>
+          )}
+        </Label>
+        <div className="flex gap-2">
+          <Input
+            id={`${provider}-key`}
+            type={isFresh && isShowing ? "text" : "password"}
+            value={displayValue}
+            onChange={(e) => handleKeyChange(provider, e.target.value)}
+            onBlur={() => handleKeyBlur(provider)}
+            onFocus={() => {
+              // When focusing a non-fresh field, clear the masked value so user can type
+              if (!isFresh && keyValue) {
+                setKeys(prev => ({ ...prev, [provider]: "" }));
+                setFreshKeys(prev => ({ ...prev, [provider]: true }));
+                setKeyStatus(prev => ({ ...prev, [provider]: { status: "idle" } }));
+              }
+            }}
+            placeholder={keyValue && !isFresh ? "Key saved — click to replace" : `Enter your ${label}`}
+            data-testid={`input-${provider}-key`}
+          />
+          {isFresh ? (
+            <Button
+              variant="outline"
+              onClick={() => setShowKeys(prev => ({ ...prev, [provider]: !isShowing }))}
+              data-testid={`button-toggle-${provider}`}
+            >
+              {isShowing ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </Button>
+          ) : keyValue ? (
+            <Button variant="outline" disabled title="Saved keys are hidden for security">
+              <Lock className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Get your API key from{" "}
+          <a
+            href={helpUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            {helpLabel}
+          </a>
+        </p>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -180,128 +394,46 @@ export default function Settings() {
                 )}
               </div>
 
-              {/* Gemini API Key */}
-              <div className="space-y-2 mb-4">
-                <Label htmlFor="gemini-key" className="flex items-center gap-2">
-                  <Key className="h-4 w-4" />
-                  Google Gemini API Key
-                  <span className="text-xs text-muted-foreground">(Recommended)</span>
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="gemini-key"
-                    type={showKeys.gemini ? "text" : "password"}
-                    value={keys.gemini}
-                    onChange={(e) => setKeys({ ...keys, gemini: e.target.value })}
-                    placeholder="Enter your Gemini API key"
-                    data-testid="input-gemini-key"
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowKeys({ ...showKeys, gemini: !showKeys.gemini })}
-                    data-testid="button-toggle-gemini"
-                  >
-                    {showKeys.gemini ? "Hide" : "Show"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Get your API key from{" "}
-                  <a
-                    href="https://aistudio.google.com/apikey"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    Google AI Studio
-                  </a>
-                </p>
-              </div>
+              {renderKeyInput(
+                "gemini",
+                "Google Gemini API Key",
+                true,
+                "https://aistudio.google.com/apikey",
+                "Google AI Studio"
+              )}
+              {renderKeyInput(
+                "openai",
+                "OpenAI API Key",
+                false,
+                "https://platform.openai.com/api-keys",
+                "OpenAI Platform"
+              )}
+              {renderKeyInput(
+                "anthropic",
+                "Anthropic API Key",
+                false,
+                "https://console.anthropic.com/settings/keys",
+                "Anthropic Console"
+              )}
 
-              {/* OpenAI API Key */}
-              <div className="space-y-2 mb-4">
-                <Label htmlFor="openai-key" className="flex items-center gap-2">
-                  <Key className="h-4 w-4" />
-                  OpenAI API Key
-                  <span className="text-xs text-muted-foreground">(Optional)</span>
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="openai-key"
-                    type={showKeys.openai ? "text" : "password"}
-                    value={keys.openai}
-                    onChange={(e) => setKeys({ ...keys, openai: e.target.value })}
-                    placeholder="Enter your OpenAI API key"
-                    data-testid="input-openai-key"
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowKeys({ ...showKeys, openai: !showKeys.openai })}
-                    data-testid="button-toggle-openai"
-                  >
-                    {showKeys.openai ? "Hide" : "Show"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Get your API key from{" "}
-                  <a
-                    href="https://platform.openai.com/api-keys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    OpenAI Platform
-                  </a>
-                </p>
-              </div>
-
-              {/* Anthropic API Key */}
-              <div className="space-y-2 mb-6">
-                <Label htmlFor="anthropic-key" className="flex items-center gap-2">
-                  <Key className="h-4 w-4" />
-                  Anthropic API Key
-                  <span className="text-xs text-muted-foreground">(Optional)</span>
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="anthropic-key"
-                    type={showKeys.anthropic ? "text" : "password"}
-                    value={keys.anthropic}
-                    onChange={(e) => setKeys({ ...keys, anthropic: e.target.value })}
-                    placeholder="Enter your Anthropic API key"
-                    data-testid="input-anthropic-key"
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowKeys({ ...showKeys, anthropic: !showKeys.anthropic })}
-                    data-testid="button-toggle-anthropic"
-                  >
-                    {showKeys.anthropic ? "Hide" : "Show"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Get your API key from{" "}
-                  <a
-                    href="https://console.anthropic.com/settings/keys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    Anthropic Console
-                  </a>
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <Button 
-                  onClick={handleSave} 
+              <div className="flex flex-wrap items-center gap-3 mt-6">
+                <Button
+                  onClick={handleSave}
                   disabled={isValidating}
                   data-testid="button-save-keys"
                 >
-                  {isValidating ? "Validating..." : "Save API Keys"}
+                  {isValidating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Validating...
+                    </>
+                  ) : (
+                    "Save API Keys"
+                  )}
                 </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={handleClear} 
+                <Button
+                  variant="outline"
+                  onClick={handleClear}
                   disabled={isValidating}
                   data-testid="button-clear-keys"
                 >

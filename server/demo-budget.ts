@@ -12,22 +12,51 @@
  *
  * Resets: session/IP counters reset per rolling window; budget resets at midnight UTC.
  * All state is in-memory (lost on restart, which is acceptable for a demo).
+ *
+ * Demo key management:
+ * Keys can be set via admin UI and are persisted to an AES-256-GCM encrypted file.
+ * Resolution order: in-memory cache -> encrypted file -> environment variables.
  */
 
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { encrypt, decrypt, isEncryptionConfigured } from "./encryption";
 import type { DemoStatus } from "../shared/types";
+
+/** Shape of the demo API key set */
+interface DemoKeyCache {
+  gemini: string;
+  openai: string;
+  anthropic: string;
+}
 
 interface RateEntry {
   count: number;
   resetAt: number;
 }
 
+/** In-memory cache for demo keys (populated from admin UI or encrypted file) */
+let demoKeyCache: DemoKeyCache | null = null;
+
+/** Path to the encrypted demo keys file, configurable via env var */
+const DEMO_KEYS_FILE_PATH = process.env.DEMO_KEYS_FILE || ".demo-keys.json";
+
 /** Check if demo mode is enabled via environment */
 export function isDemoMode(): boolean {
   return process.env.DEMO_MODE === "true";
 }
 
-/** Get demo API keys from environment */
+/**
+ * Get demo API keys.
+ *
+ * Resolution order:
+ * 1. In-memory cache (set via admin UI or loaded from encrypted file)
+ * 2. Environment variables as fallback
+ */
 export function getDemoKeys(): { gemini: string; openai: string; anthropic: string } {
+  if (demoKeyCache) {
+    return { ...demoKeyCache };
+  }
+
   return {
     gemini: process.env.DEMO_GEMINI_KEY || "",
     openai: process.env.DEMO_OPENAI_KEY || "",
@@ -35,11 +64,95 @@ export function getDemoKeys(): { gemini: string; openai: string; anthropic: stri
   };
 }
 
-/** Check if any demo keys are configured */
+/** Check if any demo keys are configured (from cache or environment) */
 export function hasAnyDemoKey(): boolean {
   const keys = getDemoKeys();
   return !!(keys.gemini || keys.openai || keys.anthropic);
 }
+
+/**
+ * Set demo API keys from the admin UI.
+ *
+ * Merges the provided partial keys with the existing set, updates the
+ * in-memory cache, and persists to an AES-256-GCM encrypted file if
+ * encryption is configured.
+ */
+export function setDemoKeys(keys: Partial<DemoKeyCache>): void {
+  const existing = getDemoKeys();
+  demoKeyCache = {
+    gemini: keys.gemini !== undefined ? keys.gemini : existing.gemini,
+    openai: keys.openai !== undefined ? keys.openai : existing.openai,
+    anthropic: keys.anthropic !== undefined ? keys.anthropic : existing.anthropic,
+  };
+
+  if (isEncryptionConfigured()) {
+    try {
+      const json = JSON.stringify(demoKeyCache);
+      const encrypted = encrypt(json);
+      writeFileSync(DEMO_KEYS_FILE_PATH, encrypted, "utf8");
+    } catch (err) {
+      console.error("[demo-budget] Failed to write encrypted demo keys file:", err);
+    }
+  }
+}
+
+/**
+ * Load demo keys from the encrypted file on disk and populate the
+ * in-memory cache.
+ *
+ * Silently no-ops if the file does not exist, encryption is not
+ * configured, or decryption fails (e.g., key rotation). This ensures
+ * the server can always fall back to environment variables.
+ */
+export function loadDemoKeysFromFile(): void {
+  if (!isEncryptionConfigured()) {
+    return;
+  }
+
+  if (!existsSync(DEMO_KEYS_FILE_PATH)) {
+    return;
+  }
+
+  try {
+    const encrypted = readFileSync(DEMO_KEYS_FILE_PATH, "utf8");
+    const json = decrypt(encrypted);
+    const parsed = JSON.parse(json) as DemoKeyCache;
+
+    demoKeyCache = {
+      gemini: parsed.gemini || "",
+      openai: parsed.openai || "",
+      anthropic: parsed.anthropic || "",
+    };
+  } catch {
+    // Silently fail — fall back to env vars
+  }
+}
+
+/**
+ * Return demo keys with values masked for safe display in the admin UI.
+ *
+ * Keys are shown as the first 4 characters + "••••" + last 4 characters.
+ * Keys shorter than 9 characters are fully masked as "••••".
+ * Empty/missing keys are returned as empty strings.
+ */
+export function getMaskedDemoKeys(): { gemini: string; openai: string; anthropic: string } {
+  const keys = getDemoKeys();
+
+  const mask = (value: string): string => {
+    if (!value) return "";
+    if (value.length < 9) return "••••";
+    return value.slice(0, 4) + "••••" + value.slice(-4);
+  };
+
+  return {
+    gemini: mask(keys.gemini),
+    openai: mask(keys.openai),
+    anthropic: mask(keys.anthropic),
+  };
+}
+
+// Load any previously persisted demo keys from the encrypted file at startup
+loadDemoKeysFromFile();
 
 export class DemoBudgetTracker {
   /** Maximum messages per session within the rate window */

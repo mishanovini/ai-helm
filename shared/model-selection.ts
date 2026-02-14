@@ -129,7 +129,7 @@ export function analyzePrompt(prompt: string): PromptAnalysis {
     taskType = "coding";
   } else if (lowerPrompt.match(/\b(math|calculate|equation|solve|theorem|proof)\b/)) {
     taskType = "math";
-  } else if (lowerPrompt.match(/\b(write|story|creative|blog|article|poem)\b/)) {
+  } else if (lowerPrompt.match(/\b(write|compose|draft|craft|author|story|creative|blog|article|poem|letter|email|speech|essay|script|narrative)\b/)) {
     taskType = "creative";
   } else if (lowerPrompt.match(/\b(chat|talk|discuss|conversation)\b/)) {
     taskType = "conversation";
@@ -157,15 +157,40 @@ export function analyzePrompt(prompt: string): PromptAnalysis {
 // ---------------------------------------------------------------------------
 
 /**
+ * Pre-computed analysis from an LLM (consolidated analysis) that can override
+ * the keyword-based heuristic in `analyzePrompt()`.
+ */
+export interface LLMAnalysisOverride {
+  taskType: PromptAnalysis["taskType"];
+  complexity: "simple" | "moderate" | "complex";
+}
+
+/**
  * Main decision tree for model selection.
  * All model references use aliases resolved at call time.
+ *
+ * @param prompt - The user's message (or full conversation context)
+ * @param availableProviders - Which API providers have keys configured
+ * @param llmAnalysis - Optional LLM-derived analysis to override keyword heuristics.
+ *   When provided, the LLM's `taskType` and `complexity` are used instead of
+ *   the keyword-based `analyzePrompt()` results.
  */
 export function selectOptimalModel(
   prompt: string,
-  availableProviders: AvailableProviders
+  availableProviders: AvailableProviders,
+  llmAnalysis?: LLMAnalysisOverride
 ): { primary: ModelOption; fallback: ModelOption | null; reasoning: string } {
   const lowerPrompt = prompt.toLowerCase();
-  const analysis = analyzePrompt(prompt);
+  const heuristicAnalysis = analyzePrompt(prompt);
+
+  // Prefer LLM-derived taskType over keyword heuristics when available
+  const analysis: PromptAnalysis = llmAnalysis
+    ? {
+        ...heuristicAnalysis,
+        taskType: llmAnalysis.taskType,
+        requiresDeepReasoning: llmAnalysis.complexity === "complex" || heuristicAnalysis.requiresDeepReasoning,
+      }
+    : heuristicAnalysis;
   const catalog = buildCatalog();
   const pricing = buildPricing();
   const availableModels = catalog.filter((m) => availableProviders[m.provider]);
@@ -192,9 +217,14 @@ export function selectOptimalModel(
   // STEP 2: Default to lightweight models unless there's a clear reason not to
   const isSubstantiveCreative =
     analysis.taskType === "creative" &&
-    (lowerPrompt.match(/\b(article|essay|blog post|screenplay|story|novel|chapter)\b/) ||
-      lowerPrompt.match(/\b(thoughtful|detailed|comprehensive|in-depth|nuanced|elaborate|polished)\b/) ||
-      (lowerPrompt.includes("write") && prompt.length > 300));
+    (
+      // Explicit content types (broad list of writing formats)
+      lowerPrompt.match(/\b(article|essay|blog\s*post|screenplay|story|novel|chapter|letter|email|speech|report|memo|proposal|presentation|script|review|critique|outline|poem|song|monologue|dialogue|narrative)\b/) ||
+      // Quality descriptors that signal substantive output is expected
+      lowerPrompt.match(/\b(thoughtful|detailed|comprehensive|in-depth|nuanced|elaborate|polished|professional|formal|creative)\b/) ||
+      // Generation verbs followed by an article/determiner — catches "write me a letter", "draft a proposal", etc.
+      lowerPrompt.match(/\b(write|compose|draft|craft|create|author)\b[\s\S]*?\b(a|an|the|my|our|this|me)\b/)
+    );
 
   const needsPremiumModel =
     analysis.requiresDeepReasoning ||

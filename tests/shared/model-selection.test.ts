@@ -161,6 +161,27 @@ describe("selectOptimalModel", () => {
     expect(result.fallback).toBeDefined();
   });
 
+  it("should route 'write me a letter' to a premium creative model", () => {
+    const result = selectOptimalModel("write me a letter about the meaning of life", allProviders);
+    // Should NOT pick an ultra-low cost model — writing tasks need premium
+    expect(["medium", "premium"]).toContain(result.primary.costTier);
+  });
+
+  it("should route 'draft an email' to a premium creative model", () => {
+    const result = selectOptimalModel("draft an email to my manager about a project update", allProviders);
+    expect(["medium", "premium"]).toContain(result.primary.costTier);
+  });
+
+  it("should route 'compose a speech' to a premium creative model", () => {
+    const result = selectOptimalModel("compose a speech for my sister's wedding", allProviders);
+    expect(["medium", "premium"]).toContain(result.primary.costTier);
+  });
+
+  it("should route short creative prompts with generation verbs to premium models", () => {
+    const result = selectOptimalModel("write me a poem about the ocean", allProviders);
+    expect(["medium", "premium"]).toContain(result.primary.costTier);
+  });
+
   it("should handle large context by selecting Gemini Pro", () => {
     const longPrompt = "x".repeat(900000); // >200K tokens
     const result = selectOptimalModel(longPrompt, allProviders);

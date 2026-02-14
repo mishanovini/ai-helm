@@ -15,12 +15,17 @@ interface AnalysisResult {
 export interface ResponseValidation {
   userSummary: string;
   validation: string;
+  /** Whether the response adequately addresses the user's request */
+  passed: boolean;
+  /** Reason for failure: refusal, off_topic, incomplete, low_quality, or undefined if passed */
+  failReason?: string;
 }
 
 /**
- * Generic analysis function that works with any provider
+ * Generic analysis function that works with any provider.
+ * Sends a system prompt + user prompt to the given model and returns the response text.
  */
-async function runAnalysis(
+export async function runAnalysis(
   model: ModelOption,
   apiKey: string,
   systemPrompt: string,
@@ -406,8 +411,9 @@ MAX_TOKENS: [500-16000]`;
 }
 
 /**
- * Validate that the AI response properly addresses the user's intent
- * Returns a summary of what the user wanted and how the response satisfies it
+ * Validate that the AI response properly addresses the user's intent.
+ * Returns a summary, assessment, and pass/fail verdict.
+ * Fails open — if parsing fails, `passed` defaults to true.
  */
 export async function validateResponse(
   userMessage: string,
@@ -416,29 +422,45 @@ export async function validateResponse(
   analysisModel: ModelOption,
   apiKey: string
 ): Promise<ResponseValidation> {
-  const systemPrompt = `You are validating an AI response to ensure it properly addresses the user's request.`;
-  
+  const systemPrompt = `You are validating an AI response to ensure it properly addresses the user's request.
+
+A response FAILS if it:
+- Refuses to answer or says it cannot help when the question is reasonable
+- Asks for context that was already provided in the conversation
+- Gives a completely off-topic answer
+- Provides a clearly inadequate or empty response
+
+Most responses should PASS. Only flag genuine failures where the user clearly did not get what they asked for.`;
+
   const userPrompt = `User's original message: "${userMessage}"
 Detected user intent: ${userIntent}
 
 AI's response: "${aiResponse}"
 
-Please provide:
-1. A brief 1-sentence summary of what the user was looking for
-2. A brief 1-sentence validation of how the AI response satisfies that need (or if it falls short)
-
-Format your response as:
-USER SEEKING: [one sentence summary]
-VALIDATION: [one sentence assessment]`;
+Provide your assessment in this exact format:
+USER SEEKING: [one sentence summary of what the user wanted]
+VALIDATION: [one sentence assessment of the response]
+QUALITY: [pass or fail]
+FAIL_REASON: [refusal | off_topic | incomplete | low_quality | none]`;
 
   const response = await runAnalysis(analysisModel, apiKey, systemPrompt, userPrompt);
-  
-  // Parse the response
+
+  // Parse the structured response
   const userSeekingMatch = response.match(/USER SEEKING:\s*(.+?)(?:\n|$)/i);
   const validationMatch = response.match(/VALIDATION:\s*(.+?)(?:\n|$)/i);
-  
+  const qualityMatch = response.match(/QUALITY:\s*(pass|fail)/i);
+  const failReasonMatch = response.match(/FAIL_REASON:\s*(\w+)/i);
+
+  // Fail-open: default to passed=true if we can't parse the quality verdict
+  const passed = qualityMatch ? qualityMatch[1].toLowerCase() === "pass" : true;
+  const failReason = !passed && failReasonMatch && failReasonMatch[1] !== "none"
+    ? failReasonMatch[1].toLowerCase()
+    : undefined;
+
   return {
     userSummary: userSeekingMatch?.[1]?.trim() || "Understanding of the topic",
-    validation: validationMatch?.[1]?.trim() || "Response addresses the user's request"
+    validation: validationMatch?.[1]?.trim() || "Response addresses the user's request",
+    passed,
+    failReason,
   };
 }

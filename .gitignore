@@ -35,6 +35,9 @@ yarn-error.log*
 *.sqlite
 *.sqlite3
 
+# Demo key storage (encrypted, managed via admin console)
+.demo-keys.json
+
 # Local configuration
 .replit
 replit.nix

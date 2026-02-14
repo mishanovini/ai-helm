@@ -1,8 +1,21 @@
+/**
+ * Admin Console Page
+ *
+ * Provides organization-level management: analytics overview, user management,
+ * API key approval, model alias monitoring, demo key management, and settings.
+ *
+ * Access control:
+ * - When auth is enabled: requires admin role via OAuth login
+ * - When auth is disabled: requires ADMIN_SECRET via a secret prompt gate
+ *   (secret stored in sessionStorage, cleared when tab closes)
+ */
+
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Slider } from "@/components/ui/slider";
@@ -10,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { Redirect } from "wouter";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import {
   LayoutDashboard,
   Users,
@@ -28,62 +41,209 @@ import {
   RefreshCw,
   CheckCircle2,
   ArrowRight,
+  Lock,
+  Loader2,
+  XCircle,
+  Sparkles,
 } from "lucide-react";
 import { useState } from "react";
 
 const CHART_COLORS = ["#3b82f6", "#22c55e", "#f97316", "#ef4444", "#a855f7", "#eab308", "#06b6d4", "#ec4899", "#6366f1"];
 
+/** Session storage key for admin secret (cleared when browser tab closes) */
+const ADMIN_SECRET_KEY = "admin_secret";
+
+/**
+ * Get the admin secret header for fetch requests.
+ * Returns an empty object if no secret is stored (auth mode).
+ */
+function getAdminHeaders(): Record<string, string> {
+  const secret = sessionStorage.getItem(ADMIN_SECRET_KEY);
+  if (secret) {
+    return { "x-admin-secret": secret };
+  }
+  return {};
+}
+
+/**
+ * Wrapper around fetch that automatically includes admin secret header.
+ */
+async function adminFetch(url: string, options?: RequestInit): Promise<Response> {
+  const headers = {
+    ...getAdminHeaders(),
+    ...(options?.headers || {}),
+  };
+  return fetch(url, { ...options, headers });
+}
+
 export default function Admin() {
-  const { isAdmin, isLoading: authLoading } = useAuth();
+  const { isAdmin, authRequired, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  if (!authLoading && !isAdmin) {
+  // Track whether we've verified the admin secret (for no-auth mode)
+  const [secretVerified, setSecretVerified] = useState<boolean>(() => {
+    // Check if there's already a valid secret in sessionStorage
+    return !!sessionStorage.getItem(ADMIN_SECRET_KEY);
+  });
+
+  // When auth is required and user is not admin, redirect
+  if (!authLoading && authRequired && !isAdmin) {
     return <Redirect to="/" />;
   }
+
+  // When auth is NOT required, show secret gate if not verified
+  if (!authLoading && !authRequired && !secretVerified) {
+    return <AdminSecretGate onVerified={() => setSecretVerified(true)} />;
+  }
+
+  // Determine if queries should be enabled
+  const canQuery = authRequired ? isAdmin : secretVerified;
+
+  return <AdminDashboard canQuery={canQuery} />;
+}
+
+// ============================================================================
+// Admin Secret Gate (shown when auth is disabled)
+// ============================================================================
+
+function AdminSecretGate({ onVerified }: { onVerified: () => void }) {
+  const [secret, setSecret] = useState("");
+  const [error, setError] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!secret.trim()) {
+      setError("Secret is required");
+      return;
+    }
+
+    setIsVerifying(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/admin/verify-secret", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: secret.trim() }),
+      });
+      const data = await res.json();
+
+      if (data.valid) {
+        sessionStorage.setItem(ADMIN_SECRET_KEY, secret.trim());
+        onVerified();
+      } else {
+        setError("Invalid admin secret. Check your ADMIN_SECRET environment variable.");
+      }
+    } catch {
+      setError("Failed to verify secret. Is the server running?");
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      <Header />
+      <div className="max-w-md mx-auto mt-24 p-6">
+        <Card>
+          <CardHeader className="text-center">
+            <div className="mx-auto bg-primary/10 rounded-full p-3 w-fit mb-2">
+              <Lock className="h-6 w-6 text-primary" />
+            </div>
+            <CardTitle>Admin Console</CardTitle>
+            <CardDescription>
+              Enter the admin secret to access the console.
+              This is configured via the <code className="text-xs bg-muted px-1 py-0.5 rounded">ADMIN_SECRET</code> environment variable.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="admin-secret">Admin Secret</Label>
+                <Input
+                  id="admin-secret"
+                  type="password"
+                  placeholder="Enter admin secret..."
+                  value={secret}
+                  onChange={(e) => { setSecret(e.target.value); setError(""); }}
+                  autoFocus
+                />
+                {error && (
+                  <p className="text-sm text-destructive flex items-center gap-1">
+                    <XCircle className="h-3 w-3" />
+                    {error}
+                  </p>
+                )}
+              </div>
+              <Button type="submit" className="w-full" disabled={isVerifying}>
+                {isVerifying ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  "Access Admin Console"
+                )}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Admin Dashboard (main content after auth)
+// ============================================================================
+
+function AdminDashboard({ canQuery }: { canQuery: boolean }) {
+  const queryClient = useQueryClient();
 
   // Analytics overview
   const { data: overview } = useQuery({
     queryKey: ["adminOverview"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/analytics/overview");
+      const res = await adminFetch("/api/admin/analytics/overview");
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
-    enabled: isAdmin,
+    enabled: canQuery,
   });
 
   // Model usage
   const { data: modelUsage } = useQuery({
     queryKey: ["adminModelUsage"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/analytics/model-usage");
+      const res = await adminFetch("/api/admin/analytics/model-usage");
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
-    enabled: isAdmin,
+    enabled: canQuery,
   });
 
   // Users
   const { data: users } = useQuery({
     queryKey: ["adminUsers"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/users");
+      const res = await adminFetch("/api/admin/users");
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
-    enabled: isAdmin,
+    enabled: canQuery,
   });
 
   // API Keys
   const { data: apiKeys } = useQuery({
     queryKey: ["adminApiKeys"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/api-keys");
+      const res = await adminFetch("/api/admin/api-keys");
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
-    enabled: isAdmin,
+    enabled: canQuery,
   });
 
   return (
@@ -96,7 +256,7 @@ export default function Admin() {
         </h1>
 
         <Tabs defaultValue="overview">
-          <TabsList>
+          <TabsList className="flex-wrap">
             <TabsTrigger value="overview">
               <BarChart3 className="h-4 w-4 mr-1" />
               Overview
@@ -108,6 +268,10 @@ export default function Admin() {
             <TabsTrigger value="keys">
               <Key className="h-4 w-4 mr-1" />
               API Keys
+            </TabsTrigger>
+            <TabsTrigger value="demo-keys">
+              <Sparkles className="h-4 w-4 mr-1" />
+              Demo Keys
             </TabsTrigger>
             <TabsTrigger value="models">
               <Cpu className="h-4 w-4 mr-1" />
@@ -222,7 +386,7 @@ export default function Admin() {
                   <TableBody>
                     {(users || []).map((user: any) => (
                       <TableRow key={user.id}>
-                        <TableCell className="font-medium">{user.name || "—"}</TableCell>
+                        <TableCell className="font-medium">{user.name || "---"}</TableCell>
                         <TableCell className="text-sm">{user.email}</TableCell>
                         <TableCell>
                           <Badge variant={user.role === "admin" ? "default" : "secondary"}>
@@ -232,7 +396,7 @@ export default function Admin() {
                         <TableCell className="text-right">{user.totalMessages}</TableCell>
                         <TableCell className="text-right">
                           <span className={user.averagePromptQuality < 30 ? "text-destructive" : ""}>
-                            {user.averagePromptQuality || "—"}
+                            {user.averagePromptQuality || "---"}
                           </span>
                         </TableCell>
                         <TableCell className="text-right">
@@ -266,6 +430,11 @@ export default function Admin() {
             <ApiKeysTab apiKeys={apiKeys} />
           </TabsContent>
 
+          {/* Demo Keys Tab */}
+          <TabsContent value="demo-keys">
+            <DemoKeysTab />
+          </TabsContent>
+
           {/* Models Tab */}
           <TabsContent value="models">
             <ModelsTab />
@@ -278,6 +447,211 @@ export default function Admin() {
         </Tabs>
       </div>
     </div>
+  );
+}
+
+// ============================================================================
+// Demo Keys Tab
+// ============================================================================
+
+/** Per-provider key status for the demo keys form */
+interface DemoKeyStatus {
+  configured: boolean;
+  masked: string;
+}
+
+function DemoKeysTab() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const [geminiKey, setGeminiKey] = useState("");
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [anthropicKey, setAnthropicKey] = useState("");
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+
+  /** Fetch current demo key status (masked previews) */
+  const { data: keyStatus, isLoading } = useQuery<{
+    gemini: DemoKeyStatus;
+    openai: DemoKeyStatus;
+    anthropic: DemoKeyStatus;
+  }>({
+    queryKey: ["adminDemoKeys"],
+    queryFn: async () => {
+      const res = await adminFetch("/api/admin/demo-keys");
+      if (!res.ok) throw new Error("Failed to load demo keys");
+      return res.json();
+    },
+  });
+
+  /** Save demo keys mutation */
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, string> = {};
+      if (geminiKey.trim()) body.gemini = geminiKey.trim();
+      if (openaiKey.trim()) body.openai = openaiKey.trim();
+      if (anthropicKey.trim()) body.anthropic = anthropicKey.trim();
+
+      if (Object.keys(body).length === 0) {
+        throw new Error("Enter at least one API key to save.");
+      }
+
+      const res = await adminFetch("/api/admin/demo-keys", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.valid === false) {
+        // Server returns per-key validation errors
+        if (data.errors) {
+          setValidationErrors(data.errors);
+        }
+        throw new Error("One or more keys failed validation.");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      setValidationErrors({});
+      setGeminiKey("");
+      setOpenaiKey("");
+      setAnthropicKey("");
+      queryClient.invalidateQueries({ queryKey: ["adminDemoKeys"] });
+      toast({ title: "Demo keys validated and saved" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to save demo keys", description: err.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Sparkles className="h-5 w-5" />
+          Demo API Keys
+        </CardTitle>
+        <CardDescription>
+          Manage API keys used for unauthenticated demo users.
+          Keys are encrypted at rest and validated before saving.
+          Set appropriate usage limits via environment variables.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Current key status */}
+        <div>
+          <p className="text-sm font-medium mb-3">Current Status</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {(["gemini", "openai", "anthropic"] as const).map((provider) => {
+              const status = keyStatus?.[provider];
+              const label = provider === "gemini" ? "Google Gemini" : provider === "openai" ? "OpenAI" : "Anthropic";
+
+              return (
+                <div key={provider} className="p-3 border rounded-lg">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium">{label}</span>
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : status?.configured ? (
+                      <Badge variant="default" className="text-xs">
+                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                        Configured
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-xs">Missing</Badge>
+                    )}
+                  </div>
+                  {status?.masked && (
+                    <p className="text-xs font-mono text-muted-foreground">{status.masked}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Update keys form */}
+        <div>
+          <p className="text-sm font-medium mb-1">Update Keys</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            Enter new keys to replace existing ones. Leave blank to keep the current key for that provider.
+          </p>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="demo-gemini" className="text-xs">Google Gemini</Label>
+              <Input
+                id="demo-gemini"
+                type="password"
+                placeholder="AIza..."
+                value={geminiKey}
+                onChange={(e) => { setGeminiKey(e.target.value); setValidationErrors(prev => { const n = {...prev}; delete n.gemini; return n; }); }}
+              />
+              {validationErrors.gemini && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <XCircle className="h-3 w-3" /> {validationErrors.gemini}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="demo-openai" className="text-xs">OpenAI</Label>
+              <Input
+                id="demo-openai"
+                type="password"
+                placeholder="sk-proj-..."
+                value={openaiKey}
+                onChange={(e) => { setOpenaiKey(e.target.value); setValidationErrors(prev => { const n = {...prev}; delete n.openai; return n; }); }}
+              />
+              {validationErrors.openai && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <XCircle className="h-3 w-3" /> {validationErrors.openai}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="demo-anthropic" className="text-xs">Anthropic</Label>
+              <Input
+                id="demo-anthropic"
+                type="password"
+                placeholder="sk-ant-..."
+                value={anthropicKey}
+                onChange={(e) => { setAnthropicKey(e.target.value); setValidationErrors(prev => { const n = {...prev}; delete n.anthropic; return n; }); }}
+              />
+              {validationErrors.anthropic && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <XCircle className="h-3 w-3" /> {validationErrors.anthropic}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending || (!geminiKey.trim() && !openaiKey.trim() && !anthropicKey.trim())}
+          >
+            {saveMutation.isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Validating & Saving...
+              </>
+            ) : (
+              "Validate & Save"
+            )}
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Keys are validated with each provider before saving.
+          </p>
+        </div>
+
+        <div className="p-3 bg-yellow-500/5 border border-yellow-500/20 rounded-lg">
+          <p className="text-xs text-yellow-400 flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            These keys are used for unauthenticated demo users. Set appropriate rate limits and daily budget caps.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -466,7 +840,7 @@ function ModelPerformance({ modelUsage }: { modelUsage: any[] | undefined }) {
                         {(m.avgResponseTime / 1000).toFixed(1)}s
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground">---</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
@@ -531,7 +905,7 @@ function ApiKeysTab({ apiKeys }: { apiKeys: any[] | undefined }) {
 
   const updateKeyMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const res = await fetch(`/api/admin/api-keys/${id}`, {
+      const res = await adminFetch(`/api/admin/api-keys/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
@@ -628,7 +1002,7 @@ function SettingsTab() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/admin/settings", {
+      const res = await adminFetch("/api/admin/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings: { securityThreshold } }),
@@ -712,7 +1086,7 @@ function ModelsTab() {
   const { data: status, isLoading } = useQuery<ModelStatus>({
     queryKey: ["adminModelsStatus"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/models/status");
+      const res = await adminFetch("/api/admin/models/status");
       if (!res.ok) throw new Error("Failed to fetch model status");
       return res.json();
     },
@@ -720,7 +1094,7 @@ function ModelsTab() {
 
   const checkMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/admin/models/check-updates", { method: "POST" });
+      const res = await adminFetch("/api/admin/models/check-updates", { method: "POST" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(body.error || "Discovery failed");

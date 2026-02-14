@@ -8,7 +8,7 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 **Consolidated Analysis Pipeline** - Single-call analysis extracts intent, sentiment, style, security risk, task type, complexity, and prompt quality in one LLM request (~75% cost reduction vs. individual calls).
 
-**Real-Time Streaming** - WebSocket-based response streaming with live analysis dashboard showing processing phases and a stop button for cancellation.
+**Real-Time Streaming** - WebSocket-based response streaming with live analysis dashboard showing processing phases, stop button for cancellation, and automatic retry with model upgrade when validation detects a poor response.
 
 **Authentication & Multi-User** - OAuth login via Google and GitHub, session management, role-based access (user/admin), organization support.
 
@@ -16,15 +16,17 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 **Learning Center** - Built-in curriculum with 11 lessons across 5 categories, prerequisite gating, and progress tracking.
 
-**Admin Console** - Organization analytics, cost analysis, model performance metrics, user management, API key approval workflows, and users-needing-attention alerts.
+**Admin Console** - Organization analytics, cost analysis, model performance metrics, user management, API key approval workflows, demo API key management with encrypted persistence, and users-needing-attention alerts. Accessible via ADMIN_SECRET in no-auth/demo mode.
 
-**Privacy-First Architecture** - User-provided API keys stored locally in browser, never on servers. Optional server-side AES-256-GCM encryption for org-managed keys.
+**Privacy-First Architecture** - User-provided API keys stored locally in browser, never on servers. Optional server-side AES-256-GCM encryption for org-managed keys. API keys validated before saving with per-key inline validation, and Show Key button secured to only reveal freshly-entered keys.
 
 **Conversation Persistence** - Full conversation history with search, sidebar navigation, and WebSocket message saving.
 
 **Progress Tracking** - Per-user prompt quality sparkline, trend indicators, lesson completion, and model usage stats visible in header and settings.
 
-**Demo Mode** - Public-facing demo with server-provided API keys, three-tier abuse protection (per-session, per-IP, and daily budget rate limiting), and automatic key injection. Users with their own keys bypass all demo limits.
+**Deep Research Detection** - LLM-based classifier determines whether a prompt warrants extended multi-source research (with heuristic fallback), replacing keyword-only detection.
+
+**Demo Mode** - Public-facing demo with server-provided API keys, three-tier abuse protection (per-session, per-IP, and daily budget rate limiting), and automatic key injection. Demo keys manageable via admin console with encrypted file persistence. Users with their own keys bypass all demo limits.
 
 ## Quick Start
 
@@ -91,6 +93,9 @@ Dynamic Router (rule evaluation)
 Parameter Tuning (temperature, top_p, max_tokens)
     |
 AI Response Generation (selected model, streamed)
+    |
+Response Validation (pass/fail quality check)
+    |-- If failed: retry with upgraded model + adjusted parameters
     |
 User Progress Update
     |
@@ -187,6 +192,11 @@ GITHUB_CLIENT_SECRET=your-github-client-secret
 # Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ENCRYPTION_KEY=64-char-hex-string
 
+# Admin console access for no-auth/demo mode
+# When REQUIRE_AUTH=false, the admin console requires this secret.
+# Generate with: openssl rand -base64 32
+ADMIN_SECRET=your-admin-secret
+
 # Server
 PORT=3000
 NODE_ENV=development
@@ -239,7 +249,15 @@ See the [Demo Mode](#demo-mode) section below for details.
 ### Demo
 - `GET /api/demo-status` - Demo mode status (no auth required)
 
-### Admin (requires admin role)
+### API Key Validation
+- `POST /api/validate-keys` - Bulk validate API keys (all provided must pass)
+- `POST /api/validate-key` - Single key inline validation
+- `POST /api/classify-research` - LLM-based deep research classification
+
+### Admin (requires admin role or ADMIN_SECRET header)
+- `POST /api/admin/verify-secret` - Verify admin secret for no-auth mode access
+- `GET /api/admin/demo-keys` - Get demo key status (masked previews)
+- `PUT /api/admin/demo-keys` - Update demo API keys (validates before saving)
 - `GET /api/admin/analytics/overview` - Org analytics
 - `GET /api/admin/analytics/model-usage` - Model usage stats
 - `GET /api/admin/users` - User list with progress
@@ -263,7 +281,7 @@ npm run test:watch
 ```
 
 Test coverage includes:
-- **Model selection** (35 tests) - catalog integrity, prompt analysis, optimal model selection, cost estimation
+- **Model selection** (39 tests) - catalog integrity, prompt analysis, optimal model selection, creative routing, cost estimation
 - **Dynamic router** (24 tests) - default rules, condition matching, first-match-wins evaluation
 - **Encryption** (9 tests) - round-trip, random IV, unicode, tampering detection
 - **Consolidated analysis** (33 tests) - schema validation, security regex patterns, JSON parsing
@@ -298,7 +316,17 @@ DEMO_SESSION_LIMIT=10
 DEMO_IP_LIMIT=30
 ```
 
-All state is in-memory (resets on server restart), which is acceptable for a demo. Rate windows are rolling (1-hour window), and the daily budget resets at midnight UTC.
+Rate limiting state is in-memory (resets on server restart), which is acceptable for a demo. Rate windows are rolling (1-hour window), and the daily budget resets at midnight UTC.
+
+### Admin-Managed Demo Keys
+
+Demo API keys can also be managed via the Admin Console (Demo Keys tab) instead of environment variables. Keys set via the admin UI are:
+- Encrypted at rest using AES-256-GCM (requires `ENCRYPTION_KEY`)
+- Persisted to `.demo-keys.json` (in `.gitignore`)
+- Validated with each provider before saving
+- Merged with existing keys (update individual providers without affecting others)
+
+Admin UI keys take priority over environment variables.
 
 ## Production Deployment
 

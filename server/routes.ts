@@ -7,10 +7,10 @@ import type { IncomingMessage } from "http";
 import { storage } from "./storage";
 import { runAnalysisJob } from "./analysis-orchestrator";
 import { validateAPIKey } from "./api-key-validator";
-import { requireAuth, requireAdmin, isAuthRequired, parseSessionFromUpgrade } from "./auth";
+import { requireAuth, requireAdmin, isAuthRequired, verifyAdminSecret, parseSessionFromUpgrade } from "./auth";
 import { getDefaultRules, seedDefaultConfig, editConfigWithNaturalLanguage } from "./dynamic-router";
 import { encrypt, decrypt, isEncryptionConfigured } from "./encryption";
-import { demoBudget, isDemoMode, getDemoKeys, hasAnyDemoKey } from "./demo-budget";
+import { demoBudget, isDemoMode, getDemoKeys, hasAnyDemoKey, setDemoKeys, getMaskedDemoKeys } from "./demo-budget";
 import { runDiscovery, getLastDiscoveryReport, startDiscoveryScheduler } from "./model-discovery";
 import { resolveAllAliases } from "../shared/model-aliases";
 
@@ -187,7 +187,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         results.anthropic = await validateAPIKey('anthropic', anthropic);
       }
 
-      const isValid = results.gemini.valid || results.openai.valid || results.anthropic.valid;
+      // All provided keys must be valid — a swapped key should fail, not pass
+      const isValid = (!gemini || results.gemini.valid) &&
+                      (!openai || results.openai.valid) &&
+                      (!anthropic || results.anthropic.valid);
 
       res.status(200).json({ valid: isValid, results });
     } catch (error: any) {
@@ -197,6 +200,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: "Failed to validate API keys",
         details: error.message
       });
+    }
+  });
+
+  /**
+   * Validate a single API key for a specific provider.
+   * Used for inline per-field validation on the settings page.
+   */
+  app.post("/api/validate-key", async (req, res) => {
+    try {
+      const { provider, key } = req.body;
+
+      if (!provider || !key) {
+        return res.status(400).json({ valid: false, error: "Provider and key are required" });
+      }
+
+      if (!["gemini", "openai", "anthropic"].includes(provider)) {
+        return res.status(400).json({ valid: false, error: `Unknown provider: ${provider}` });
+      }
+
+      const result = await validateAPIKey(provider, key);
+      res.status(200).json(result);
+    } catch (error: any) {
+      console.error("Single key validation error:", error);
+      res.status(500).json({ valid: false, error: "Validation failed" });
+    }
+  });
+
+  // ========================================================================
+  // Deep Research Classification
+  // ========================================================================
+
+  /**
+   * Use an LLM to classify whether a prompt warrants deep, multi-source research.
+   * Falls back to false if no API keys are available or the call times out.
+   */
+  app.post("/api/classify-research", async (req, res) => {
+    try {
+      const { message, apiKeys: clientKeys } = req.body;
+
+      if (!message) {
+        return res.status(400).json({ deepResearch: false });
+      }
+
+      // Use demo keys if user has none, falling back to false if no keys at all
+      const keys = {
+        gemini: clientKeys?.gemini || (isDemoMode() ? getDemoKeys().gemini : ""),
+        openai: clientKeys?.openai || (isDemoMode() ? getDemoKeys().openai : ""),
+        anthropic: clientKeys?.anthropic || (isDemoMode() ? getDemoKeys().anthropic : ""),
+      };
+
+      const { selectCheapestModel } = await import("../shared/model-selection");
+      const { runAnalysis } = await import("./universal-analysis");
+
+      const providers = {
+        gemini: !!keys.gemini,
+        openai: !!keys.openai,
+        anthropic: !!keys.anthropic,
+      };
+
+      const model = selectCheapestModel(providers);
+      if (!model) {
+        return res.json({ deepResearch: false });
+      }
+
+      const apiKey = keys[model.provider] || "";
+
+      // 3-second timeout — if LLM takes too long, default to not deep research
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+
+      try {
+        const response = await Promise.race([
+          runAnalysis(
+            model,
+            apiKey,
+            "You classify user prompts. Answer with only 'yes' or 'no'.",
+            `Does this prompt require deep, multi-source research that would benefit from extended analysis taking several minutes? Only say 'yes' if the user is asking for comprehensive research, detailed analysis from multiple angles, or investigation that requires synthesizing many sources.\n\nPrompt: "${message}"`
+          ),
+          new Promise<string>((_, reject) =>
+            setTimeout(() => reject(new Error("timeout")), 3000)
+          ),
+        ]);
+
+        clearTimeout(timeout);
+        const answer = response.trim().toLowerCase();
+        res.json({ deepResearch: answer.startsWith("yes") });
+      } catch {
+        clearTimeout(timeout);
+        res.json({ deepResearch: false });
+      }
+    } catch {
+      res.json({ deepResearch: false });
     }
   });
 
@@ -594,6 +689,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ========================================================================
   // Admin REST API (admin-gated)
   // ========================================================================
+
+  /**
+   * Verify admin secret for no-auth/demo mode admin console access.
+   * When auth is enabled, this endpoint is not needed (use normal login).
+   */
+  app.post("/api/admin/verify-secret", (req, res) => {
+    const { secret } = req.body;
+    if (!secret || typeof secret !== "string") {
+      return res.status(400).json({ valid: false, error: "Secret is required" });
+    }
+    const valid = verifyAdminSecret(secret);
+    res.json({ valid });
+  });
+
+  /**
+   * Get demo API keys with masked values for admin display.
+   * Returns each provider's key status and a masked preview.
+   */
+  app.get("/api/admin/demo-keys", requireAdmin, (_req, res) => {
+    try {
+      const masked = getMaskedDemoKeys();
+      const keys = getDemoKeys();
+      res.json({
+        gemini: { configured: !!keys.gemini, masked: masked.gemini },
+        openai: { configured: !!keys.openai, masked: masked.openai },
+        anthropic: { configured: !!keys.anthropic, masked: masked.anthropic },
+      });
+    } catch (error: any) {
+      console.error("Admin demo keys error:", error);
+      res.status(500).json({ error: "Failed to get demo keys" });
+    }
+  });
+
+  /**
+   * Set demo API keys via the admin console.
+   * Accepts partial updates — only provided keys are changed.
+   * Validates each key before saving.
+   */
+  app.put("/api/admin/demo-keys", requireAdmin, async (req, res) => {
+    try {
+      const { gemini, openai, anthropic } = req.body;
+
+      // Validate each provided key before persisting
+      const errors: Record<string, string> = {};
+      if (gemini) {
+        const result = await validateAPIKey("gemini", gemini);
+        if (!result.valid) errors.gemini = result.error || "Invalid key";
+      }
+      if (openai) {
+        const result = await validateAPIKey("openai", openai);
+        if (!result.valid) errors.openai = result.error || "Invalid key";
+      }
+      if (anthropic) {
+        const result = await validateAPIKey("anthropic", anthropic);
+        if (!result.valid) errors.anthropic = result.error || "Invalid key";
+      }
+
+      if (Object.keys(errors).length > 0) {
+        return res.status(400).json({ valid: false, errors });
+      }
+
+      // Build partial update (only include provided, non-empty keys)
+      const update: Partial<{ gemini: string; openai: string; anthropic: string }> = {};
+      if (gemini !== undefined) update.gemini = gemini;
+      if (openai !== undefined) update.openai = openai;
+      if (anthropic !== undefined) update.anthropic = anthropic;
+
+      setDemoKeys(update);
+
+      const masked = getMaskedDemoKeys();
+      res.json({
+        valid: true,
+        gemini: { configured: !!getDemoKeys().gemini, masked: masked.gemini },
+        openai: { configured: !!getDemoKeys().openai, masked: masked.openai },
+        anthropic: { configured: !!getDemoKeys().anthropic, masked: masked.anthropic },
+      });
+    } catch (error: any) {
+      console.error("Admin set demo keys error:", error);
+      res.status(500).json({ error: "Failed to update demo keys" });
+    }
+  });
 
   // Analytics overview
   app.get("/api/admin/analytics/overview", requireAdmin, async (req, res) => {
