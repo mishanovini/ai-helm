@@ -10,9 +10,11 @@ import { validateAPIKey } from "./api-key-validator";
 import { requireAuth, requireAdmin, isAuthRequired, verifyAdminSecret, parseSessionFromUpgrade } from "./auth";
 import { getDefaultRules, seedDefaultConfig, editConfigWithNaturalLanguage } from "./dynamic-router";
 import { encrypt, decrypt, isEncryptionConfigured } from "./encryption";
-import { demoBudget, isDemoMode, getDemoKeys, hasAnyDemoKey, setDemoKeys, getMaskedDemoKeys } from "./demo-budget";
+import { demoBudget, isDemoMode, getDemoKeys, hasAnyDemoKey, setDemoKeys, getMaskedDemoKeys, DEMO_ORG_ID } from "./demo-budget";
+import { isDatabaseAvailable } from "./db";
 import { runDiscovery, getLastDiscoveryReport, startDiscoveryScheduler } from "./model-discovery";
 import { resolveAllAliases } from "../shared/model-aliases";
+import { getAllProviderStatuses } from "./provider-status";
 
 /**
  * Simple in-memory rate limiter for WebSocket connections
@@ -502,12 +504,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get active router config (user override or org default)
   app.get("/api/router/config", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
-      const orgId = req.user?.orgId;
-      if (!userId || !orgId) return res.status(401).json({ error: "Not authenticated" });
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
+      if (!orgId) return res.status(401).json({ error: "Not authenticated" });
 
       // Try user-level first, then org-level
-      let config = await storage.getActiveRouterConfig(orgId, userId);
+      let config = userId ? await storage.getActiveRouterConfig(orgId, userId) : null;
       if (!config) {
         config = await storage.getActiveRouterConfig(orgId);
       }
@@ -528,8 +530,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Save router config (creates new version)
   app.put("/api/router/config", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
-      const orgId = req.user?.orgId;
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
       if (!userId || !orgId) return res.status(401).json({ error: "Not authenticated" });
 
       const { rules, catchAll, scope, changeDescription } = req.body;
@@ -538,8 +540,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // scope: "org" (admin only) or "user" (personal override)
+      // In demo mode (no auth), allow org-level edits
       const isUserScope = scope === "user";
-      if (!isUserScope && req.user?.role !== "admin") {
+      if (!isUserScope && isAuthRequired() && req.user?.role !== "admin") {
         return res.status(403).json({ error: "Only admins can modify org-level config" });
       }
 
@@ -574,7 +577,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get router config version history
   app.get("/api/router/config/history", requireAuth, async (req, res) => {
     try {
-      const orgId = req.user?.orgId;
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
       if (!orgId) return res.status(401).json({ error: "Not authenticated" });
 
       const configs = await storage.listRouterConfigsByOrg(orgId);
@@ -595,10 +598,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Revert router config to a specific version
   app.post("/api/router/config/revert/:version", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
-      const orgId = req.user?.orgId;
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
       if (!userId || !orgId) return res.status(401).json({ error: "Not authenticated" });
-      if (req.user?.role !== "admin") {
+      // In demo mode (no auth), allow reverts; otherwise require admin role
+      if (isAuthRequired() && req.user?.role !== "admin") {
         return res.status(403).json({ error: "Only admins can revert config" });
       }
 
@@ -646,7 +650,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Natural language config editing
   app.post("/api/router/config/edit-natural-language", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       const { instruction, currentRules, currentCatchAll, apiKeys } = req.body;
@@ -674,8 +678,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Seed default router config for org
   app.post("/api/router/config/seed", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
-      const orgId = req.user?.orgId;
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
       if (!userId || !orgId) return res.status(401).json({ error: "Not authenticated" });
 
       const config = await seedDefaultConfig(orgId, userId);
@@ -774,7 +778,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Analytics overview
   app.get("/api/admin/analytics/overview", requireAdmin, async (req, res) => {
     try {
-      const orgId = req.user?.orgId;
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
       if (!orgId) return res.status(401).json({ error: "Not authenticated" });
 
       const overview = await storage.getAnalyticsOverview(orgId);
@@ -788,7 +792,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Model usage stats
   app.get("/api/admin/analytics/model-usage", requireAdmin, async (req, res) => {
     try {
-      const orgId = req.user?.orgId;
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
       if (!orgId) return res.status(401).json({ error: "Not authenticated" });
 
       const stats = await storage.getModelUsageStats(orgId);
@@ -802,7 +806,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // List org users
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     try {
-      const orgId = req.user?.orgId;
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
       if (!orgId) return res.status(401).json({ error: "Not authenticated" });
 
       const orgUsers = await storage.listUsersByOrg(orgId);
@@ -829,7 +833,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // List org API keys
   app.get("/api/admin/api-keys", requireAdmin, async (req, res) => {
     try {
-      const orgId = req.user?.orgId;
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
       if (!orgId) return res.status(401).json({ error: "Not authenticated" });
 
       const keys = await storage.listApiKeysByOrg(orgId);
@@ -945,7 +949,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/admin/settings", requireAdmin, async (req, res) => {
     try {
-      const orgId = req.user?.orgId;
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
       if (!orgId) return res.status(401).json({ error: "Not authenticated" });
 
       const { settings } = req.body;
@@ -958,6 +962,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Admin settings error:", error);
       res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  // ========================================================================
+  // Admin: Add/Delete Org API Keys
+  // ========================================================================
+
+  /**
+   * Add an org-level API key via the admin console.
+   * Validates the key, encrypts it, and stores it as auto-approved.
+   */
+  app.post("/api/admin/api-keys", requireAdmin, async (req, res) => {
+    try {
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
+      if (!orgId) return res.status(401).json({ error: "Not authenticated" });
+
+      const { provider, key } = req.body;
+      if (!provider || !key) {
+        return res.status(400).json({ error: "provider and key are required" });
+      }
+      if (!["gemini", "openai", "anthropic"].includes(provider)) {
+        return res.status(400).json({ error: "Invalid provider" });
+      }
+
+      // Validate the key before saving
+      const validation = await validateAPIKey(provider, key);
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.error || "Invalid key" });
+      }
+
+      // Encrypt and store as org-level, auto-approved
+      const encryptedKey = encrypt(key);
+      const apiKey = await storage.createApiKey({
+        orgId,
+        userId: null,
+        provider,
+        encryptedKey,
+        status: "approved",
+        requestedBy: req.user?.id || null,
+      });
+
+      res.status(201).json({ ...apiKey, encryptedKey: "***" });
+    } catch (error: any) {
+      console.error("Admin add API key error:", error);
+      res.status(500).json({ error: "Failed to add API key" });
+    }
+  });
+
+  /**
+   * Delete an org-level API key via the admin console.
+   */
+  app.delete("/api/admin/api-keys/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteApiKey(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Admin delete API key error:", error);
+      res.status(500).json({ error: "Failed to delete API key" });
+    }
+  });
+
+  // ========================================================================
+  // Admin: Get Organization Settings
+  // ========================================================================
+
+  /**
+   * Get current organization settings (security threshold, rate limits, etc.).
+   * Used by the Settings tab to load the saved values on mount.
+   */
+  app.get("/api/admin/settings", requireAdmin, async (req, res) => {
+    try {
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
+      if (!orgId) return res.status(401).json({ error: "Not authenticated" });
+
+      const org = await storage.getOrganization(orgId);
+      res.json(org?.settings || { securityThreshold: 8 });
+    } catch (error: any) {
+      console.error("Admin get settings error:", error);
+      res.status(500).json({ error: "Failed to get settings" });
+    }
+  });
+
+  // ========================================================================
+  // Admin: Demo Rate Limits & Budget
+  // ========================================================================
+
+  /**
+   * Get current demo rate limit configuration and today's spend.
+   */
+  app.get("/api/admin/demo-limits", requireAdmin, (_req, res) => {
+    try {
+      res.json(demoBudget.getLimits());
+    } catch (error: any) {
+      console.error("Admin get demo limits error:", error);
+      res.status(500).json({ error: "Failed to get demo limits" });
+    }
+  });
+
+  /**
+   * Update demo rate limits at runtime.
+   * Persists changes to the encrypted config file.
+   */
+  app.put("/api/admin/demo-limits", requireAdmin, (req, res) => {
+    try {
+      const { maxPerSession, maxPerIP, dailyBudgetUsd } = req.body;
+      demoBudget.setLimits({ maxPerSession, maxPerIP, dailyBudgetUsd });
+      res.json(demoBudget.getLimits());
+    } catch (error: any) {
+      console.error("Admin set demo limits error:", error);
+      res.status(500).json({ error: "Failed to update demo limits" });
     }
   });
 
@@ -1037,6 +1151,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // ========================================================================
+  // Provider Status (public — helps users understand provider availability)
+  // ========================================================================
+
+  /** Get real-time operational status of all AI providers */
+  app.get("/api/providers/status", async (_req, res) => {
+    try {
+      const status = await getAllProviderStatuses();
+      res.json(status);
+    } catch (error: any) {
+      console.error("Provider status fetch error:", error);
+      res.status(500).json({ error: "Failed to fetch provider status" });
+    }
+  });
+
+  // ========================================================================
   // WebSocket Setup
   // ========================================================================
 
@@ -1088,24 +1217,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     clearInterval(heartbeatTimer);
   });
 
-  wss.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const clientIP = getClientIP(req);
 
     // Heartbeat tracking
     (ws as any)._isAlive = true;
     ws.on("pong", () => { (ws as any)._isAlive = true; });
-
-    // Parse session to get userId for authenticated connections
-    let userId: string | null = null;
-    let orgId: string | null = null;
-    const sessionMiddleware = app.get("sessionMiddleware") as RequestHandler | undefined;
-    if (sessionMiddleware) {
-      userId = await parseSessionFromUpgrade(req, sessionMiddleware);
-      if (userId) {
-        const user = await storage.getUser(userId);
-        orgId = user?.orgId ?? null;
-      }
-    }
 
     // Track active jobs for cancellation
     const activeJobs = new Map<string, AbortController>();
@@ -1113,13 +1230,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Per-connection analyze rate tracking
     const analyzeTimestamps: number[] = [];
 
-    console.log("WebSocket client connected", {
-      ip: clientIP,
-      origin: req.headers.origin,
-      authenticated: !!userId
+    // Connection context — populated async, but message listener is registered
+    // synchronously to prevent message loss (ws library doesn't buffer messages
+    // that arrive before a listener is registered).
+    let userId: string | null = null;
+    let orgId: string | null = isAuthRequired() ? null : DEMO_ORG_ID;
+    let setupComplete = false;
+    const pendingMessages: (Buffer | string)[] = [];
+
+    // Async setup: parse session, create demo user
+    const setupPromise = (async () => {
+      const sessionMiddleware = app.get("sessionMiddleware") as RequestHandler | undefined;
+      if (sessionMiddleware) {
+        userId = await parseSessionFromUpgrade(req, sessionMiddleware);
+        if (userId) {
+          const user = await storage.getUser(userId);
+          orgId = user?.orgId ?? null;
+        }
+      }
+
+      // For unauthenticated demo connections, create/find a demo user by IP
+      if (!userId && orgId === DEMO_ORG_ID && isDatabaseAvailable()) {
+        try {
+          const demoEmail = `demo-${clientIP.replace(/[.:]/g, "-")}@demo.local`;
+          let demoUser = await storage.getUserByEmail(demoEmail);
+          if (!demoUser) {
+            demoUser = await storage.createUser({
+              email: demoEmail,
+              name: `Demo User (${clientIP})`,
+              orgId: DEMO_ORG_ID,
+              role: "user",
+            });
+            // Also create initial progress record
+            await storage.createUserProgress({ userId: demoUser.id });
+          }
+          userId = demoUser.id;
+        } catch (err) {
+          console.warn("[demo] Failed to create demo user for IP:", clientIP, err);
+        }
+      }
+
+      console.log("WebSocket client connected", {
+        ip: clientIP,
+        origin: req.headers.origin,
+        authenticated: !!userId,
+      });
+
+      setupComplete = true;
+
+      // Drain any messages that arrived during setup
+      for (const queued of pendingMessages) {
+        handleMessage(queued);
+      }
+      pendingMessages.length = 0;
+    })();
+
+    // Register message listener synchronously to avoid losing messages
+    ws.on("message", (data: Buffer | string) => {
+      if (!setupComplete) {
+        pendingMessages.push(data);
+        return;
+      }
+      handleMessage(data);
     });
 
-    ws.on("message", async (data: Buffer | string) => {
+    async function handleMessage(data: Buffer | string) {
+      // Wait for setup if it hasn't finished (belt-and-suspenders)
+      if (!setupComplete) await setupPromise;
+
       // Enforce message size limit BEFORE parsing
       const rawSize = typeof data === "string" ? data.length : data.byteLength;
       if (rawSize > MAX_MESSAGE_SIZE) {
@@ -1187,13 +1365,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return;
           }
 
-          // Resolve API keys: user-provided keys take priority, then demo keys
+          // Resolve API keys: user keys → org keys → demo keys
           let resolvedKeys = apiKeys;
           let isDemoRequest = false;
 
           const userHasKeys = resolvedKeys && (resolvedKeys.gemini || resolvedKeys.openai || resolvedKeys.anthropic);
 
-          if (!userHasKeys && isDemoMode() && hasAnyDemoKey()) {
+          if (!userHasKeys && orgId && isDatabaseAvailable()) {
+            // Try org-level API keys from the database
+            try {
+              const orgKeys = await storage.listApiKeysByOrg(orgId);
+              const approved = orgKeys.filter(k => k.status === "approved");
+              const orgResolved = {
+                gemini: "",
+                openai: "",
+                anthropic: "",
+              };
+              for (const k of approved) {
+                try {
+                  const decryptedKey = decrypt(k.encryptedKey);
+                  if (decryptedKey && !orgResolved[k.provider as keyof typeof orgResolved]) {
+                    orgResolved[k.provider as keyof typeof orgResolved] = decryptedKey;
+                  }
+                } catch {
+                  // Skip keys that fail to decrypt
+                }
+              }
+              if (orgResolved.gemini || orgResolved.openai || orgResolved.anthropic) {
+                resolvedKeys = orgResolved;
+                // Org keys: no demo rate limits, but could add org rate limits here later
+              }
+            } catch {
+              // Non-critical: fall through to demo keys
+            }
+          }
+
+          const hasResolvedKeys = resolvedKeys && (resolvedKeys.gemini || resolvedKeys.openai || resolvedKeys.anthropic);
+
+          if (!hasResolvedKeys && isDemoMode() && hasAnyDemoKey()) {
             // Demo mode: check rate limits before injecting demo keys
             const demoCheck = demoBudget.canSend(clientIP, clientIP);
             if (!demoCheck.allowed) {
@@ -1207,8 +1416,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
             resolvedKeys = getDemoKeys();
             isDemoRequest = true;
-          } else if (!userHasKeys) {
-            // No keys and no demo mode
+          } else if (!hasResolvedKeys) {
+            // No keys from any source
             ws.send(JSON.stringify({
               jobId,
               phase: "error",
@@ -1286,7 +1495,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           error: "Invalid message format"
         }));
       }
-    });
+    }
 
     ws.on("close", () => {
       console.log("WebSocket client disconnected");

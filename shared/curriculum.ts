@@ -653,7 +653,7 @@ AI Helm's security scoring protects your organization automatically. Understandi
     estimatedMinutes: 5,
     content: `# Protecting Sensitive Data
 
-When using AI tools, it's crucial to be mindful of what data you include in your prompts.
+When using AI tools, it's crucial to be mindful of what data you include in your prompts. Your messages are sent to external AI providers (Google, OpenAI, Anthropic), so anything you type could be processed by their systems.
 
 ## What NOT to Include in Prompts
 
@@ -670,9 +670,32 @@ When using AI tools, it's crucial to be mindful of what data you include in your
 - Proprietary code or algorithms
 - Unreleased product details
 
+## How AI Helm Protects You: DLP Scanning
+
+AI Helm includes **Data Loss Prevention (DLP)** — a system that automatically scans your messages for sensitive data before they reach any AI model.
+
+**What is DLP?** DLP (Data Loss Prevention) is a security technique used by organizations to detect and prevent sensitive information from being shared where it shouldn't be. Think of it like a spell-checker, but instead of typos, it looks for things like credit card numbers, Social Security numbers, and API keys.
+
+**How it works in AI Helm:**
+1. Before your message is processed, DLP scans it for patterns like credit card numbers, SSNs, phone numbers, email addresses, and API keys
+2. If sensitive data is found, you'll see a **warning** in the process log
+3. The sensitive data is **automatically redacted** (replaced with placeholders like \`[REDACTED_SSN]\`) in **all** calls to AI providers — analysis, prompt optimization, and response generation
+4. No sensitive data ever leaves AI Helm — the redacted version is used for every external API call
+
+> **Why full redaction?** Even if you intended to share sensitive data with the AI, third-party AI providers may log, store, or use your data for training. AI Helm prevents this by ensuring sensitive information never reaches external servers.
+
+**What DLP detects:**
+- Credit card numbers (Visa, Mastercard, Amex, etc.)
+- Social Security numbers (US format)
+- API keys and tokens (OpenAI, Google, GitHub, AWS, etc.)
+- Email addresses
+- Phone numbers
+- IP addresses
+- Bank account numbers (IBAN format)
+
 ## Safe Alternatives
 
-Instead of sharing real data, use:
+Even with DLP protection, it's best practice to avoid sharing sensitive data when possible:
 
 ### 1. Anonymized Data
 Replace "John Smith, SSN 123-45-6789" with "User A, SSN XXX-XX-XXXX"
@@ -696,7 +719,7 @@ AI Helm stores your API keys securely:
 
 ## Key Takeaway
 
-Treat AI prompts like public messages. Never include data you wouldn't want exposed. Use anonymization, synthetic data, or descriptions instead.`,
+AI Helm's DLP scanner ensures sensitive data never leaves your system — it's automatically redacted before any AI provider sees it. But the best protection is still awareness. Use anonymization, synthetic data, or placeholders when possible, and let DLP catch anything you miss.`,
   },
 ];
 

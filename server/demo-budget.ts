@@ -16,17 +16,37 @@
  * Demo key management:
  * Keys can be set via admin UI and are persisted to an AES-256-GCM encrypted file.
  * Resolution order: in-memory cache -> encrypted file -> environment variables.
+ *
+ * Default org:
+ * A well-known "demo-default-org" organization is created in the database at startup.
+ * All unauthenticated traffic is assigned to this org, so existing DB-backed analytics
+ * (admin dashboard, model usage, user tracking) work without special demo branches.
  */
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { encrypt, decrypt, isEncryptionConfigured } from "./encryption";
+import { isDatabaseAvailable } from "./db";
+import { storage } from "./storage";
 import type { DemoStatus } from "../shared/types";
+
+/** Well-known ID for the default demo organization */
+export const DEMO_ORG_ID = "demo-default-org";
 
 /** Shape of the demo API key set */
 interface DemoKeyCache {
   gemini: string;
   openai: string;
   anthropic: string;
+}
+
+/** Persisted demo configuration (keys + limits) */
+interface DemoConfig {
+  keys: DemoKeyCache;
+  limits?: {
+    maxPerSession: number;
+    maxPerIP: number;
+    dailyBudgetUsd: number;
+  };
 }
 
 interface RateEntry {
@@ -37,12 +57,42 @@ interface RateEntry {
 /** In-memory cache for demo keys (populated from admin UI or encrypted file) */
 let demoKeyCache: DemoKeyCache | null = null;
 
-/** Path to the encrypted demo keys file, configurable via env var */
+/** Path to the encrypted demo config file, configurable via env var */
 const DEMO_KEYS_FILE_PATH = process.env.DEMO_KEYS_FILE || ".demo-keys.json";
 
-/** Check if demo mode is enabled via environment */
+/**
+ * Check if demo mode is enabled.
+ *
+ * Demo mode is ON by default — the app works out of the box. Set
+ * DEMO_MODE=false explicitly to disable it.
+ */
 export function isDemoMode(): boolean {
-  return process.env.DEMO_MODE === "true";
+  return process.env.DEMO_MODE !== "false";
+}
+
+/**
+ * Ensure the default demo organization exists in the database.
+ *
+ * Called once on server startup. Creates a "Demo" org with the well-known
+ * DEMO_ORG_ID if it doesn't already exist. All unauthenticated traffic is
+ * assigned to this org so existing DB analytics work seamlessly.
+ */
+export async function ensureDemoOrg(): Promise<string> {
+  try {
+    const existing = await storage.getOrganization(DEMO_ORG_ID);
+    if (existing) return existing.id;
+
+    const org = await storage.createOrganization({
+      id: DEMO_ORG_ID,
+      name: "Demo",
+      settings: { securityThreshold: 8 },
+    });
+    console.log("[demo] Created default demo organization:", org.id);
+    return org.id;
+  } catch (error) {
+    console.error("[demo] Failed to create demo organization:", error);
+    return DEMO_ORG_ID;
+  }
 }
 
 /**
@@ -85,47 +135,7 @@ export function setDemoKeys(keys: Partial<DemoKeyCache>): void {
     anthropic: keys.anthropic !== undefined ? keys.anthropic : existing.anthropic,
   };
 
-  if (isEncryptionConfigured()) {
-    try {
-      const json = JSON.stringify(demoKeyCache);
-      const encrypted = encrypt(json);
-      writeFileSync(DEMO_KEYS_FILE_PATH, encrypted, "utf8");
-    } catch (err) {
-      console.error("[demo-budget] Failed to write encrypted demo keys file:", err);
-    }
-  }
-}
-
-/**
- * Load demo keys from the encrypted file on disk and populate the
- * in-memory cache.
- *
- * Silently no-ops if the file does not exist, encryption is not
- * configured, or decryption fails (e.g., key rotation). This ensures
- * the server can always fall back to environment variables.
- */
-export function loadDemoKeysFromFile(): void {
-  if (!isEncryptionConfigured()) {
-    return;
-  }
-
-  if (!existsSync(DEMO_KEYS_FILE_PATH)) {
-    return;
-  }
-
-  try {
-    const encrypted = readFileSync(DEMO_KEYS_FILE_PATH, "utf8");
-    const json = decrypt(encrypted);
-    const parsed = JSON.parse(json) as DemoKeyCache;
-
-    demoKeyCache = {
-      gemini: parsed.gemini || "",
-      openai: parsed.openai || "",
-      anthropic: parsed.anthropic || "",
-    };
-  } catch {
-    // Silently fail — fall back to env vars
-  }
+  persistDemoConfig();
 }
 
 /**
@@ -151,8 +161,82 @@ export function getMaskedDemoKeys(): { gemini: string; openai: string; anthropic
   };
 }
 
-// Load any previously persisted demo keys from the encrypted file at startup
-loadDemoKeysFromFile();
+// ---------------------------------------------------------------------------
+// Persisted Demo Config (keys + limits)
+// ---------------------------------------------------------------------------
+
+/** Cached limits from the encrypted config file */
+let cachedLimits: DemoConfig["limits"] | null = null;
+
+/**
+ * Load demo config (keys + limits) from the encrypted file on disk.
+ *
+ * Silently no-ops if the file does not exist, encryption is not
+ * configured, or decryption fails (e.g., key rotation). This ensures
+ * the server can always fall back to environment variables.
+ */
+export function loadDemoConfigFromFile(): void {
+  if (!isEncryptionConfigured()) {
+    return;
+  }
+
+  if (!existsSync(DEMO_KEYS_FILE_PATH)) {
+    return;
+  }
+
+  try {
+    const encrypted = readFileSync(DEMO_KEYS_FILE_PATH, "utf8");
+    const json = decrypt(encrypted);
+    const parsed = JSON.parse(json);
+
+    // Support both old format (just keys) and new format (keys + limits)
+    if (parsed.keys) {
+      // New format: { keys: {...}, limits?: {...} }
+      const config = parsed as DemoConfig;
+      demoKeyCache = {
+        gemini: config.keys.gemini || "",
+        openai: config.keys.openai || "",
+        anthropic: config.keys.anthropic || "",
+      };
+      if (config.limits) {
+        cachedLimits = config.limits;
+      }
+    } else {
+      // Legacy format: just the key object directly
+      demoKeyCache = {
+        gemini: parsed.gemini || "",
+        openai: parsed.openai || "",
+        anthropic: parsed.anthropic || "",
+      };
+    }
+  } catch {
+    // Silently fail — fall back to env vars
+  }
+}
+
+/** Persist the current demo config (keys + limits) to the encrypted file */
+function persistDemoConfig(): void {
+  if (!isEncryptionConfigured()) return;
+
+  try {
+    const config: DemoConfig = {
+      keys: getDemoKeys(),
+      limits: cachedLimits || undefined,
+    };
+    const json = JSON.stringify(config);
+    const encrypted = encrypt(json);
+    writeFileSync(DEMO_KEYS_FILE_PATH, encrypted, "utf8");
+  } catch (err) {
+    console.error("[demo-budget] Failed to write encrypted config file:", err);
+  }
+}
+
+// Load any previously persisted demo config from the encrypted file at startup
+loadDemoConfigFromFile();
+
+// ---------------------------------------------------------------------------
+// DemoBudgetTracker
+// ---------------------------------------------------------------------------
 
 export class DemoBudgetTracker {
   /** Maximum messages per session within the rate window */
@@ -182,12 +266,15 @@ export class DemoBudgetTracker {
     windowMs?: number;
     dailyBudgetUsd?: number;
   }) {
-    this.maxPerSession = options?.maxPerSession
+    this.maxPerSession = cachedLimits?.maxPerSession
+      ?? options?.maxPerSession
       ?? (Number(process.env.DEMO_SESSION_LIMIT) || 10);
-    this.maxPerIP = options?.maxPerIP
+    this.maxPerIP = cachedLimits?.maxPerIP
+      ?? options?.maxPerIP
       ?? (Number(process.env.DEMO_IP_LIMIT) || 30);
     this.windowMs = options?.windowMs ?? 60 * 60 * 1000; // 1 hour
-    this.dailyBudgetUsd = options?.dailyBudgetUsd
+    this.dailyBudgetUsd = cachedLimits?.dailyBudgetUsd
+      ?? options?.dailyBudgetUsd
       ?? (Number(process.env.DEMO_DAILY_BUDGET) || 2.0);
     this.currentDay = this.getUTCDay();
 
@@ -282,6 +369,35 @@ export class DemoBudgetTracker {
   getSpentToday(): number {
     this.checkDayRollover();
     return this.spentTodayUsd;
+  }
+
+  /** Get current rate limit configuration */
+  getLimits(): { maxPerSession: number; maxPerIP: number; dailyBudgetUsd: number; spentTodayUsd: number } {
+    this.checkDayRollover();
+    return {
+      maxPerSession: this.maxPerSession,
+      maxPerIP: this.maxPerIP,
+      dailyBudgetUsd: this.dailyBudgetUsd,
+      spentTodayUsd: this.spentTodayUsd,
+    };
+  }
+
+  /**
+   * Update rate limits at runtime from the admin UI.
+   * Persists changes to the encrypted config file.
+   */
+  setLimits(limits: Partial<{ maxPerSession: number; maxPerIP: number; dailyBudgetUsd: number }>): void {
+    if (limits.maxPerSession !== undefined) this.maxPerSession = limits.maxPerSession;
+    if (limits.maxPerIP !== undefined) this.maxPerIP = limits.maxPerIP;
+    if (limits.dailyBudgetUsd !== undefined) this.dailyBudgetUsd = limits.dailyBudgetUsd;
+
+    // Update cached limits and persist
+    cachedLimits = {
+      maxPerSession: this.maxPerSession,
+      maxPerIP: this.maxPerIP,
+      dailyBudgetUsd: this.dailyBudgetUsd,
+    };
+    persistDemoConfig();
   }
 
   /** Dispose of the cleanup interval (for testing) */

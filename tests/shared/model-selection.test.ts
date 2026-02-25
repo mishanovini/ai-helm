@@ -164,28 +164,28 @@ describe("selectOptimalModel", () => {
   it("should route 'write me a letter' to a premium creative model", () => {
     const result = selectOptimalModel("write me a letter about the meaning of life", allProviders);
     // Should NOT pick an ultra-low cost model — writing tasks need premium
-    expect(["medium", "premium"]).toContain(result.primary.costTier);
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
   });
 
   it("should route 'draft an email' to a premium creative model", () => {
     const result = selectOptimalModel("draft an email to my manager about a project update", allProviders);
-    expect(["medium", "premium"]).toContain(result.primary.costTier);
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
   });
 
   it("should route 'compose a speech' to a premium creative model", () => {
     const result = selectOptimalModel("compose a speech for my sister's wedding", allProviders);
-    expect(["medium", "premium"]).toContain(result.primary.costTier);
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
   });
 
   it("should route short creative prompts with generation verbs to premium models", () => {
     const result = selectOptimalModel("write me a poem about the ocean", allProviders);
-    expect(["medium", "premium"]).toContain(result.primary.costTier);
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
   });
 
   it("should handle large context by selecting Gemini Pro", () => {
     const longPrompt = "x".repeat(900000); // >200K tokens
     const result = selectOptimalModel(longPrompt, allProviders);
-    expect(result.primary.model).toBe("gemini-2.5-pro");
+    expect(result.primary.model).toBe("gemini-3.1-pro-preview");
   });
 
   it("should throw for large context when Gemini not available", () => {
@@ -204,7 +204,7 @@ describe("selectCheapestModel", () => {
     expect(result).toBeNull();
   });
 
-  it("should return Gemini Flash-Lite when Gemini is available", () => {
+  it("should return Gemini Flash-Lite when only Gemini is available", () => {
     const result = selectCheapestModel({ gemini: true, openai: false, anthropic: false });
     expect(result).not.toBeNull();
     expect(result!.model).toBe("gemini-2.5-flash-lite");
@@ -219,8 +219,8 @@ describe("selectCheapestModel", () => {
   it("should return the cheapest model regardless of provider", () => {
     const result = selectCheapestModel({ gemini: true, openai: true, anthropic: true });
     expect(result).not.toBeNull();
-    // Gemini Flash-Lite at $0.10 input should be cheapest
-    expect(result!.model).toBe("gemini-2.5-flash-lite");
+    // GPT-5 Nano at $0.05 input is now cheapest
+    expect(result!.model).toBe("gpt-5-nano");
   });
 });
 
@@ -261,7 +261,7 @@ describe("estimateCost", () => {
   });
 
   it("should default estimated output tokens to 500", () => {
-    const model = MODEL_CATALOG.find((m) => m.model === "gpt-5")!;
+    const model = MODEL_CATALOG.find((m) => m.model === "gpt-5.2")!;
     const resultWithDefault = estimateCost(model, 1000);
     const resultWithExplicit = estimateCost(model, 1000, 500);
     expect(resultWithDefault.totalCost).toBe(resultWithExplicit.totalCost);

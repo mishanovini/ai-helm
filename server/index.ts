@@ -1,7 +1,12 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { setupAuth } from "./auth";
+import { isDatabaseAvailable } from "./db";
+import { ensureDemoOrg, isDemoMode, DEMO_ORG_ID } from "./demo-budget";
+import { seedDefaultConfig } from "./dynamic-router";
+import { storage } from "./storage";
 
 const app = express();
 app.use(express.json());
@@ -9,6 +14,25 @@ app.use(express.urlencoded({ extended: false }));
 
 // Set up session + passport BEFORE routes
 setupAuth(app);
+
+// Ensure the default demo organization exists in the database
+if (isDatabaseAvailable()) {
+  ensureDemoOrg()
+    .then(async (orgId) => {
+      if (isDemoMode()) {
+        log(`Demo mode active — default org: ${orgId}`);
+      }
+      // Seed default router config if none exists for the demo org
+      const existing = await storage.getActiveRouterConfig(DEMO_ORG_ID);
+      if (!existing) {
+        await seedDefaultConfig(DEMO_ORG_ID, "demo-system");
+        log("Default router config seeded for demo org");
+      }
+    })
+    .catch((err) => {
+      console.error("[startup] Failed to ensure demo org:", err);
+    });
+}
 
 app.use((req, res, next) => {
   const start = Date.now();

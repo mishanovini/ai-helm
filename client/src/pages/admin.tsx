@@ -277,6 +277,10 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
               <Cpu className="h-4 w-4 mr-1" />
               Models
             </TabsTrigger>
+            <TabsTrigger value="health">
+              <Zap className="h-4 w-4 mr-1" />
+              Health
+            </TabsTrigger>
             <TabsTrigger value="settings">
               <Settings className="h-4 w-4 mr-1" />
               Settings
@@ -438,6 +442,11 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
           {/* Models Tab */}
           <TabsContent value="models">
             <ModelsTab />
+          </TabsContent>
+
+          {/* Provider Health Tab */}
+          <TabsContent value="health">
+            <ProviderHealthTab />
           </TabsContent>
 
           {/* Settings Tab */}
@@ -647,11 +656,155 @@ function DemoKeysTab() {
         <div className="p-3 bg-yellow-500/5 border border-yellow-500/20 rounded-lg">
           <p className="text-xs text-yellow-400 flex items-center gap-1">
             <AlertTriangle className="h-3 w-3 shrink-0" />
-            These keys are used for unauthenticated demo users. Set appropriate rate limits and daily budget caps.
+            These keys are used for unauthenticated demo users. Configure rate limits and daily budget below.
           </p>
         </div>
       </CardContent>
+
+      {/* Rate Limits & Budget */}
+      <DemoRateLimitsSection />
     </Card>
+  );
+}
+
+/** Rate Limits & Budget section within the Demo Keys tab */
+function DemoRateLimitsSection() {
+  const { toast } = useToast();
+
+  /** Fetch current limits */
+  const { data: limits } = useQuery<{
+    maxPerSession: number;
+    maxPerIP: number;
+    dailyBudgetUsd: number;
+    spentTodayUsd: number;
+  }>({
+    queryKey: ["adminDemoLimits"],
+    queryFn: async () => {
+      const res = await adminFetch("/api/admin/demo-limits");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    refetchInterval: 30000, // Refresh spend counter every 30s
+  });
+
+  const [sessionLimit, setSessionLimit] = useState<number | "">(10);
+  const [ipLimit, setIpLimit] = useState<number | "">(30);
+  const [dailyBudget, setDailyBudget] = useState<number | "">(2.0);
+  const [limitsLoaded, setLimitsLoaded] = useState(false);
+
+  // Populate form from fetched values (once)
+  if (limits && !limitsLoaded) {
+    setSessionLimit(limits.maxPerSession);
+    setIpLimit(limits.maxPerIP);
+    setDailyBudget(limits.dailyBudgetUsd);
+    setLimitsLoaded(true);
+  }
+
+  const saveLimitsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await adminFetch("/api/admin/demo-limits", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          maxPerSession: Number(sessionLimit) || 10,
+          maxPerIP: Number(ipLimit) || 30,
+          dailyBudgetUsd: Number(dailyBudget) || 2.0,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to update limits");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Demo rate limits updated" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update limits", variant: "destructive" });
+    },
+  });
+
+  const spentToday = limits?.spentTodayUsd ?? 0;
+  const budgetVal = Number(dailyBudget) || 2.0;
+  const spendPct = budgetVal > 0 ? Math.min(100, (spentToday / budgetVal) * 100) : 0;
+
+  return (
+    <CardContent className="space-y-5 border-t pt-6">
+      <div>
+        <p className="text-sm font-medium mb-1">Rate Limits & Budget</p>
+        <p className="text-xs text-muted-foreground mb-4">
+          Controls for unauthenticated demo users. These limits persist across server restarts.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="demo-session-limit" className="text-xs">Session Limit (msgs/hour)</Label>
+            <Input
+              id="demo-session-limit"
+              type="number"
+              min={1}
+              max={100}
+              value={sessionLimit}
+              onChange={(e) => setSessionLimit(e.target.value ? Number(e.target.value) : "")}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="demo-ip-limit" className="text-xs">IP Limit (msgs/hour)</Label>
+            <Input
+              id="demo-ip-limit"
+              type="number"
+              min={1}
+              max={500}
+              value={ipLimit}
+              onChange={(e) => setIpLimit(e.target.value ? Number(e.target.value) : "")}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="demo-daily-budget" className="text-xs">Daily Budget (USD)</Label>
+            <Input
+              id="demo-daily-budget"
+              type="number"
+              min={0.10}
+              max={100}
+              step={0.50}
+              value={dailyBudget}
+              onChange={(e) => setDailyBudget(e.target.value ? Number(e.target.value) : "")}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Today's spend progress bar */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Today's Spend</span>
+          <span className="font-medium">
+            ${spentToday.toFixed(2)} / ${budgetVal.toFixed(2)}
+          </span>
+        </div>
+        <div className="w-full bg-muted rounded-full h-2">
+          <div
+            className={`rounded-full h-2 transition-all ${
+              spendPct >= 90 ? "bg-destructive" : spendPct >= 70 ? "bg-yellow-500" : "bg-primary"
+            }`}
+            style={{ width: `${spendPct}%` }}
+          />
+        </div>
+      </div>
+
+      <Button
+        onClick={() => saveLimitsMutation.mutate()}
+        disabled={saveLimitsMutation.isPending}
+        variant="outline"
+      >
+        {saveLimitsMutation.isPending ? (
+          <>
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            Saving...
+          </>
+        ) : (
+          "Save Limits"
+        )}
+      </Button>
+    </CardContent>
   );
 }
 
@@ -791,11 +944,11 @@ function CostAnalysis({
 function ModelPerformance({ modelUsage }: { modelUsage: any[] | undefined }) {
   if (!modelUsage || modelUsage.length === 0) return null;
 
-  // Derive performance data from model usage (enriched with avg response time if available)
+  // Derive performance data from model usage (enriched with avg response time)
   const performanceData = modelUsage.map((m: any) => ({
     model: m.model,
     requests: m.count,
-    avgResponseTime: m.avgResponseTime ?? null,
+    avgResponseTime: m.avgResponseTimeMs ?? null,
     provider: m.provider || inferProvider(m.model),
   }));
 
@@ -903,6 +1056,35 @@ function ApiKeysTab({ apiKeys }: { apiKeys: any[] | undefined }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Add key form state
+  const [newProvider, setNewProvider] = useState<"gemini" | "openai" | "anthropic">("gemini");
+  const [newKey, setNewKey] = useState("");
+  const [addError, setAddError] = useState("");
+
+  /** Add a new org-level API key */
+  const addKeyMutation = useMutation({
+    mutationFn: async () => {
+      const res = await adminFetch("/api/admin/api-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: newProvider, key: newKey.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add key");
+      return data;
+    },
+    onSuccess: () => {
+      setNewKey("");
+      setAddError("");
+      queryClient.invalidateQueries({ queryKey: ["adminApiKeys"] });
+      toast({ title: `${newProvider} API key added and validated` });
+    },
+    onError: (err: Error) => {
+      setAddError(err.message);
+    },
+  });
+
+  /** Approve/reject a pending key */
   const updateKeyMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
       const res = await adminFetch(`/api/admin/api-keys/${id}`, {
@@ -919,79 +1101,169 @@ function ApiKeysTab({ apiKeys }: { apiKeys: any[] | undefined }) {
     },
   });
 
+  /** Delete an org-level key */
+  const deleteKeyMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await adminFetch(`/api/admin/api-keys/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["adminApiKeys"] });
+      toast({ title: "API key deleted" });
+    },
+    onError: () => {
+      toast({ title: "Failed to delete key", variant: "destructive" });
+    },
+  });
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Organization API Keys</CardTitle>
-        <CardDescription>Manage API keys for your organization</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Provider</TableHead>
-              <TableHead>Scope</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(apiKeys || []).map((key: any) => (
-              <TableRow key={key.id}>
-                <TableCell>
-                  <Badge variant="outline">{key.provider}</Badge>
-                </TableCell>
-                <TableCell className="text-sm">
-                  {key.userId ? "User" : "Organization"}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant={
-                      key.status === "approved" ? "default" :
-                      key.status === "rejected" ? "destructive" :
-                      "secondary"
-                    }
-                  >
-                    {key.status}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {new Date(key.createdAt).toLocaleDateString()}
-                </TableCell>
-                <TableCell>
-                  {key.status === "pending" && (
+    <div className="space-y-6">
+      {/* Add new org API key */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Key className="h-5 w-5" />
+            Add Org API Key
+          </CardTitle>
+          <CardDescription>
+            Add an API key shared with all organization users. Keys are validated, encrypted, and stored securely.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="add-key-provider" className="text-xs">Provider</Label>
+              <select
+                id="add-key-provider"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={newProvider}
+                onChange={(e) => { setNewProvider(e.target.value as any); setAddError(""); }}
+              >
+                <option value="gemini">Google Gemini</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </div>
+            <div className="sm:col-span-2 space-y-1">
+              <Label htmlFor="add-key-value" className="text-xs">API Key</Label>
+              <Input
+                id="add-key-value"
+                type="password"
+                placeholder={newProvider === "gemini" ? "AIza..." : newProvider === "openai" ? "sk-proj-..." : "sk-ant-..."}
+                value={newKey}
+                onChange={(e) => { setNewKey(e.target.value); setAddError(""); }}
+              />
+            </div>
+          </div>
+          {addError && (
+            <p className="text-sm text-destructive flex items-center gap-1">
+              <XCircle className="h-3 w-3" /> {addError}
+            </p>
+          )}
+          <Button
+            onClick={() => addKeyMutation.mutate()}
+            disabled={addKeyMutation.isPending || !newKey.trim()}
+          >
+            {addKeyMutation.isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Validating & Adding...
+              </>
+            ) : (
+              "Validate & Add"
+            )}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Existing keys table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Organization API Keys</CardTitle>
+          <CardDescription>
+            These keys are shared with all org users. For rate-limited demo access, use the Demo Keys tab.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Provider</TableHead>
+                <TableHead>Scope</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(apiKeys || []).map((key: any) => (
+                <TableRow key={key.id}>
+                  <TableCell>
+                    <Badge variant="outline">{key.provider}</Badge>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {key.userId ? "User" : "Organization"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        key.status === "approved" ? "default" :
+                        key.status === "rejected" ? "destructive" :
+                        "secondary"
+                      }
+                    >
+                      {key.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {new Date(key.createdAt).toLocaleDateString()}
+                  </TableCell>
+                  <TableCell>
                     <div className="flex gap-1">
+                      {key.status === "pending" && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => updateKeyMutation.mutate({ id: key.id, status: "approved" })}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => updateKeyMutation.mutate({ id: key.id, status: "rejected" })}
+                          >
+                            Reject
+                          </Button>
+                        </>
+                      )}
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => updateKeyMutation.mutate({ id: key.id, status: "approved" })}
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => deleteKeyMutation.mutate(key.id)}
+                        disabled={deleteKeyMutation.isPending}
                       >
-                        Approve
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => updateKeyMutation.mutate({ id: key.id, status: "rejected" })}
-                      >
-                        Reject
+                        Delete
                       </Button>
                     </div>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-            {(!apiKeys || apiKeys.length === 0) && (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                  No API keys found
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {(!apiKeys || apiKeys.length === 0) && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                    No API keys found. Add an org-level key above to let all users access the app.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -999,6 +1271,32 @@ function SettingsTab() {
   const { toast } = useToast();
   const [securityThreshold, setSecurityThreshold] = useState(8);
   const [hasChanges, setHasChanges] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  /** Load saved org settings on mount */
+  const { data: savedSettings } = useQuery<{
+    securityThreshold: number;
+    orgRateLimits?: {
+      maxPerUserPerHour: number;
+      maxPerIPPerHour: number;
+      dailyBudgetUsd: number;
+    };
+  }>({
+    queryKey: ["adminSettings"],
+    queryFn: async () => {
+      const res = await adminFetch("/api/admin/settings");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+
+  // Initialize form from saved values (once)
+  if (savedSettings && !settingsLoaded) {
+    if (savedSettings.securityThreshold != null) {
+      setSecurityThreshold(savedSettings.securityThreshold);
+    }
+    setSettingsLoaded(true);
+  }
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -1027,10 +1325,10 @@ function SettingsTab() {
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-3">
-          <Label>Security Threshold</Label>
+          <Label>Security Threshold (1–10)</Label>
           <p className="text-xs text-muted-foreground">
-            Prompts with a security score at or above this threshold will be blocked.
-            Lower values are more restrictive.
+            Prompts scoring at or above this level are blocked.
+            Lower = stricter. Currently: prompts rated <strong>≥ {securityThreshold}/10</strong> will be halted.
           </p>
           <div className="flex items-center gap-4">
             <Slider
@@ -1044,8 +1342,8 @@ function SettingsTab() {
             <span className="text-lg font-bold w-8 text-center">{securityThreshold}</span>
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>1 (very strict)</span>
-            <span>10 (permissive)</span>
+            <span>1 (very strict — blocks most prompts)</span>
+            <span>10 (permissive — only critical threats)</span>
           </div>
         </div>
 
@@ -1053,7 +1351,14 @@ function SettingsTab() {
           onClick={() => saveMutation.mutate()}
           disabled={!hasChanges || saveMutation.isPending}
         >
-          {saveMutation.isPending ? "Saving..." : "Save Settings"}
+          {saveMutation.isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            "Save Settings"
+          )}
         </Button>
       </CardContent>
     </Card>
@@ -1238,6 +1543,149 @@ function ModelsTab() {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Provider Health Tab
+// ============================================================================
+
+/** Status level badge colors */
+const STATUS_COLORS: Record<string, string> = {
+  operational: "bg-green-500/10 text-green-600 border-green-500/30",
+  degraded: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30",
+  partial_outage: "bg-orange-500/10 text-orange-600 border-orange-500/30",
+  major_outage: "bg-red-500/10 text-red-600 border-red-500/30",
+  unknown: "bg-gray-500/10 text-gray-500 border-gray-500/30",
+};
+
+/** Human-readable status labels */
+const STATUS_LABELS: Record<string, string> = {
+  operational: "Operational",
+  degraded: "Degraded",
+  partial_outage: "Partial Outage",
+  major_outage: "Major Outage",
+  unknown: "Unknown",
+};
+
+/** Provider display names and icons */
+const PROVIDER_INFO: Record<string, { label: string; color: string }> = {
+  openai: { label: "OpenAI", color: "text-green-500" },
+  anthropic: { label: "Anthropic", color: "text-orange-500" },
+  gemini: { label: "Google Gemini", color: "text-blue-500" },
+};
+
+function ProviderHealthTab() {
+  const queryClient = useQueryClient();
+
+  const { data: healthData, isLoading, dataUpdatedAt } = useQuery({
+    queryKey: ["providerHealth"],
+    queryFn: async () => {
+      const res = await fetch("/api/providers/status");
+      if (!res.ok) throw new Error("Failed to fetch provider status");
+      return res.json();
+    },
+    refetchInterval: 60000, // Auto-refresh every 60 seconds
+    staleTime: 30000,
+  });
+
+  const providers = healthData?.providers;
+  const fetchedAt = healthData?.fetchedAt;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg">Provider Health</CardTitle>
+              <CardDescription>
+                Real-time operational status of AI providers
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              {fetchedAt && (
+                <span className="text-xs text-muted-foreground">
+                  Updated {new Date(fetchedAt).toLocaleTimeString()}
+                </span>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => queryClient.invalidateQueries({ queryKey: ["providerHealth"] })}
+                disabled={isLoading}
+              >
+                <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading && !providers ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              Checking provider status...
+            </div>
+          ) : providers ? (
+            <div className="grid gap-4 md:grid-cols-3">
+              {(["openai", "anthropic", "gemini"] as const).map(key => {
+                const provider = providers[key];
+                if (!provider) return null;
+                const info = PROVIDER_INFO[key];
+                const statusColor = STATUS_COLORS[provider.status] || STATUS_COLORS.unknown;
+                const statusLabel = STATUS_LABELS[provider.status] || "Unknown";
+
+                return (
+                  <Card key={key} className="border">
+                    <CardContent className="pt-4 pb-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className={`font-semibold ${info.color}`}>
+                          {info.label}
+                        </span>
+                        <Badge variant="outline" className={statusColor}>
+                          {statusLabel}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {provider.description}
+                      </p>
+                      {provider.activeIncidents?.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          <p className="text-xs font-medium text-destructive">
+                            Active Incidents:
+                          </p>
+                          {provider.activeIncidents.map((inc: any, i: number) => (
+                            <div key={i} className="text-xs bg-destructive/5 rounded p-2">
+                              <span className="font-medium">{inc.name}</span>
+                              <span className="text-muted-foreground ml-2">
+                                ({inc.status})
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <a
+                        href={provider.statusPageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline mt-2 inline-flex items-center gap-1"
+                      >
+                        Status page <ArrowRight className="h-3 w-3" />
+                      </a>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              Could not load provider status
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

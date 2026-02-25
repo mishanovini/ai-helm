@@ -410,6 +410,7 @@ function RuleCard({
   onDelete,
   onMove,
   totalRules,
+  readOnly = false,
 }: {
   rule: RouterRule;
   index: number;
@@ -417,6 +418,7 @@ function RuleCard({
   onDelete: () => void;
   onMove: (direction: "up" | "down") => void;
   totalRules: number;
+  readOnly?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -466,36 +468,42 @@ function RuleCard({
     <Card className={`transition-opacity ${!rule.enabled ? "opacity-50" : ""}`}>
       <div className="p-4">
         <div className="flex items-center gap-3">
-          <div className="flex flex-col gap-0.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              disabled={index === 0}
-              onClick={() => onMove("up")}
-            >
-              <ChevronUp className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              disabled={index === totalRules - 1}
-              onClick={() => onMove("down")}
-            >
-              <ChevronDown className="h-3 w-3" />
-            </Button>
-          </div>
+          {!readOnly && (
+            <div className="flex flex-col gap-0.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5"
+                disabled={index === 0}
+                onClick={() => onMove("up")}
+              >
+                <ChevronUp className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5"
+                disabled={index === totalRules - 1}
+                onClick={() => onMove("down")}
+              >
+                <ChevronDown className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
 
-          <GripVertical className="h-4 w-4 text-muted-foreground" />
+          {!readOnly && <GripVertical className="h-4 w-4 text-muted-foreground" />}
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <Input
-                value={rule.name}
-                onChange={e => onUpdate({ ...rule, name: e.target.value })}
-                className="h-7 text-sm font-medium max-w-[200px]"
-              />
+              {readOnly ? (
+                <span className="text-sm font-medium">{rule.name}</span>
+              ) : (
+                <Input
+                  value={rule.name}
+                  onChange={e => onUpdate({ ...rule, name: e.target.value })}
+                  className="h-7 text-sm font-medium max-w-[200px]"
+                />
+              )}
               <div className="flex gap-1 flex-wrap">
                 {(rule.conditions.taskTypes || []).map(t => (
                   <Badge key={t} variant="outline" className="text-xs">{t}</Badge>
@@ -522,22 +530,29 @@ function RuleCard({
             </div>
           </div>
 
-          <Switch
-            checked={rule.enabled}
-            onCheckedChange={enabled => onUpdate({ ...rule, enabled })}
-          />
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setExpanded(!expanded)}
-          >
-            {expanded ? "Collapse" : "Edit"}
-          </Button>
-
-          <Button variant="ghost" size="icon" onClick={onDelete}>
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
+          {!readOnly && (
+            <>
+              <Switch
+                checked={rule.enabled}
+                onCheckedChange={enabled => onUpdate({ ...rule, enabled })}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setExpanded(!expanded)}
+              >
+                {expanded ? "Collapse" : "Edit"}
+              </Button>
+              <Button variant="ghost" size="icon" onClick={onDelete}>
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+            </>
+          )}
+          {readOnly && (
+            <Badge variant={rule.enabled ? "default" : "outline"} className="text-xs">
+              {rule.enabled ? "Active" : "Disabled"}
+            </Badge>
+          )}
         </div>
 
         {expanded && (
@@ -692,7 +707,8 @@ function RuleCard({
 
 export default function Router() {
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin, authRequired } = useAuth();
+  const canEdit = isAdmin || !authRequired;
   const queryClient = useQueryClient();
   const [rules, setRules] = useState<RouterRule[]>([]);
   const [catchAll, setCatchAll] = useState<string[]>([]);
@@ -804,12 +820,18 @@ export default function Router() {
   const seedMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/router/config/seed", { method: "POST" });
-      if (!res.ok) throw new Error("Failed to seed");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }));
+        throw new Error(err.error || `Failed to seed (${res.status})`);
+      }
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["routerConfig"] });
       toast({ title: "Default config created" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to create config", description: err.message, variant: "destructive" });
     },
   });
 
@@ -885,35 +907,39 @@ export default function Router() {
               Configure how prompts are routed to AI models. Rules are evaluated top-to-bottom; first match wins.
             </p>
           </div>
-          <div className="flex gap-2">
-            {isAdmin && (
-              <Select value={scope} onValueChange={(v: "org" | "user") => setScope(v)}>
-                <SelectTrigger className="w-36">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="org">Org Default</SelectItem>
-                  <SelectItem value="user">My Override</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-            <Button
-              onClick={() => saveMutation.mutate()}
-              disabled={!hasUnsavedChanges || saveMutation.isPending}
-            >
-              <Save className="h-4 w-4 mr-1" />
-              {saveMutation.isPending ? "Saving..." : "Save"}
-            </Button>
-          </div>
+          {canEdit && (
+            <div className="flex gap-2">
+              {isAdmin && (
+                <Select value={scope} onValueChange={(v: "org" | "user") => setScope(v)}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="org">Org Default</SelectItem>
+                    <SelectItem value="user">My Override</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              <Button
+                onClick={() => saveMutation.mutate()}
+                disabled={!hasUnsavedChanges || saveMutation.isPending}
+              >
+                <Save className="h-4 w-4 mr-1" />
+                {saveMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          )}
         </div>
 
         <Tabs defaultValue="rules">
           <TabsList>
             <TabsTrigger value="rules">Rules</TabsTrigger>
-            <TabsTrigger value="ai-edit">
-              <Wand2 className="h-4 w-4 mr-1" />
-              AI Edit
-            </TabsTrigger>
+            {canEdit && (
+              <TabsTrigger value="ai-edit">
+                <Wand2 className="h-4 w-4 mr-1" />
+                AI Edit
+              </TabsTrigger>
+            )}
             <TabsTrigger value="history">
               <History className="h-4 w-4 mr-1" />
               History
@@ -930,9 +956,11 @@ export default function Router() {
               <Card className="p-8">
                 <div className="text-center space-y-4">
                   <p className="text-muted-foreground">No router config found for your organization.</p>
-                  <Button onClick={() => seedMutation.mutate()} disabled={seedMutation.isPending}>
-                    {seedMutation.isPending ? "Creating..." : "Create Default Config"}
-                  </Button>
+                  {canEdit && (
+                    <Button onClick={() => seedMutation.mutate()} disabled={seedMutation.isPending}>
+                      {seedMutation.isPending ? "Creating..." : "Create Default Config"}
+                    </Button>
+                  )}
                 </div>
               </Card>
             ) : (
@@ -948,15 +976,18 @@ export default function Router() {
                         onUpdate={updated => updateRule(i, updated)}
                         onDelete={() => deleteRule(i)}
                         onMove={dir => moveRule(i, dir)}
+                        readOnly={!canEdit}
                       />
                     ))}
                   </div>
                 </ScrollArea>
 
-                <Button variant="outline" onClick={addRule} className="w-full">
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add Rule
-                </Button>
+                {canEdit && (
+                  <Button variant="outline" onClick={addRule} className="w-full">
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Rule
+                  </Button>
+                )}
 
                 {/* Catch-All */}
                 <Card className="p-4">
@@ -975,66 +1006,70 @@ export default function Router() {
                           <Badge className={`text-xs ${getProviderColor(model?.provider || "")}`}>
                             {model?.name || modelId}
                           </Badge>
-                          <div className="flex gap-0.5 ml-auto">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5"
-                              disabled={i === 0}
-                              onClick={() => {
-                                const newCatchAll = [...catchAll];
-                                [newCatchAll[i - 1], newCatchAll[i]] = [newCatchAll[i], newCatchAll[i - 1]];
-                                setCatchAll(newCatchAll);
-                                setHasUnsavedChanges(true);
-                              }}
-                            >
-                              <ChevronUp className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5"
-                              disabled={i === catchAll.length - 1}
-                              onClick={() => {
-                                const newCatchAll = [...catchAll];
-                                [newCatchAll[i], newCatchAll[i + 1]] = [newCatchAll[i + 1], newCatchAll[i]];
-                                setCatchAll(newCatchAll);
-                                setHasUnsavedChanges(true);
-                              }}
-                            >
-                              <ChevronDown className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5"
-                              onClick={() => {
-                                setCatchAll(catchAll.filter((_, ci) => ci !== i));
-                                setHasUnsavedChanges(true);
-                              }}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
+                          {canEdit && (
+                            <div className="flex gap-0.5 ml-auto">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5"
+                                disabled={i === 0}
+                                onClick={() => {
+                                  const newCatchAll = [...catchAll];
+                                  [newCatchAll[i - 1], newCatchAll[i]] = [newCatchAll[i], newCatchAll[i - 1]];
+                                  setCatchAll(newCatchAll);
+                                  setHasUnsavedChanges(true);
+                                }}
+                              >
+                                <ChevronUp className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5"
+                                disabled={i === catchAll.length - 1}
+                                onClick={() => {
+                                  const newCatchAll = [...catchAll];
+                                  [newCatchAll[i], newCatchAll[i + 1]] = [newCatchAll[i + 1], newCatchAll[i]];
+                                  setCatchAll(newCatchAll);
+                                  setHasUnsavedChanges(true);
+                                }}
+                              >
+                                <ChevronDown className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5"
+                                onClick={() => {
+                                  setCatchAll(catchAll.filter((_, ci) => ci !== i));
+                                  setHasUnsavedChanges(true);
+                                }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                   </div>
-                  <Select onValueChange={id => {
-                    if (!catchAll.includes(id)) {
-                      setCatchAll([...catchAll, id]);
-                      setHasUnsavedChanges(true);
-                    }
-                  }}>
-                    <SelectTrigger className="h-8 w-48 mt-2">
-                      <SelectValue placeholder="Add model..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MODEL_OPTIONS.filter(m => !catchAll.includes(m.id)).map(m => (
-                        <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {canEdit && (
+                    <Select onValueChange={id => {
+                      if (!catchAll.includes(id)) {
+                        setCatchAll([...catchAll, id]);
+                        setHasUnsavedChanges(true);
+                      }
+                    }}>
+                      <SelectTrigger className="h-8 w-48 mt-2">
+                        <SelectValue placeholder="Add model..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MODEL_OPTIONS.filter(m => !catchAll.includes(m.id)).map(m => (
+                          <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </Card>
               </>
             )}
@@ -1214,7 +1249,7 @@ export default function Router() {
                             >
                               B
                             </Button>
-                            {isAdmin && (
+                            {canEdit && (
                               <Button
                                 variant="outline"
                                 size="sm"

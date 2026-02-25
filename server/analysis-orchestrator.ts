@@ -5,6 +5,7 @@ import {
   tuneParameters,
   validateResponse
 } from "./universal-analysis";
+import { scanForSensitiveData } from "./dlp-scanner";
 import {
   selectOptimalModel,
   selectCheapestModel,
@@ -76,7 +77,40 @@ export async function runAnalysisJob(
       return;
     }
 
-    const analysisApiKey = apiKeys[analysisModel.provider] || '';
+    let analysisApiKey = apiKeys[analysisModel.provider] || '';
+
+    // Build a fallback list of analysis models from other providers in case the
+    // cheapest one has a broken key (e.g., restricted OpenAI permissions).
+    const analysisFallbacks = MODEL_CATALOG
+      .filter(m => providers[m.provider] && m.provider !== analysisModel.provider)
+      .sort((a, b) => (a.costTier === "ultra-low" ? -1 : a.costTier === "low" ? 0 : 1));
+
+    // ========================================================================
+    // Phase 0: DLP Scan — detect sensitive data before sending to LLMs
+    // ========================================================================
+
+    const dlpResult = scanForSensitiveData(message);
+    if (dlpResult.hasSensitiveData) {
+      sendUpdate("dlp_warning", "completed", {
+        findings: dlpResult.findings,
+        summary: dlpResult.summary,
+        redacted: true,
+      });
+      console.warn(`DLP: ${dlpResult.summary} — redacting before LLM calls`);
+    }
+
+    // Use redacted message for ALL LLM calls — sensitive data never leaves AI Helm
+    const safeMessage = dlpResult.hasSensitiveData
+      ? dlpResult.redactedMessage
+      : message;
+
+    // Also redact any PII in conversation history (prior messages may contain sensitive data)
+    const safeHistory = conversationHistory.map(msg => {
+      const scan = scanForSensitiveData(msg.content);
+      return scan.hasSensitiveData
+        ? { ...msg, content: scan.redactedMessage }
+        : msg;
+    });
 
     // ========================================================================
     // Phase 1: Consolidated Analysis (single LLM call replaces 4 separate calls)
@@ -88,16 +122,36 @@ export async function runAnalysisJob(
     sendUpdate("style", "processing");
     sendUpdate("security", "processing");
 
-    let analysis: ConsolidatedAnalysisResult;
+    let analysis: ConsolidatedAnalysisResult | undefined;
     try {
-      analysis = await runConsolidatedAnalysis(message, analysisModel, analysisApiKey);
-    } catch (error: any) {
-      sendUpdate("intent", "error", undefined, error.message);
-      sendUpdate("sentiment", "error", undefined, error.message);
-      sendUpdate("style", "error", undefined, error.message);
-      sendUpdate("security", "error", undefined, error.message);
-      sendUpdate("complete", "error", undefined, "Consolidated analysis failed");
-      return;
+      analysis = await runConsolidatedAnalysis(safeMessage, analysisModel, analysisApiKey);
+    } catch (firstError: any) {
+      console.warn(`Consolidated analysis failed with ${analysisModel.provider}: ${firstError.message}`);
+      // Primary analysis model failed — try fallback providers before giving up
+      for (const fallbackModel of analysisFallbacks) {
+        const fallbackKey = apiKeys[fallbackModel.provider] || '';
+        try {
+          console.warn(
+            `Analysis failed with ${analysisModel.provider}, retrying with ${fallbackModel.provider}`
+          );
+          analysis = await runConsolidatedAnalysis(safeMessage, fallbackModel, fallbackKey);
+          // Update analysis model/key for subsequent phases (prompt opt, param tuning, validation)
+          Object.assign(analysisModel, fallbackModel);
+          analysisApiKey = fallbackKey;
+          break;
+        } catch {
+          // This fallback also failed — try next
+        }
+      }
+
+      if (!analysis) {
+        sendUpdate("intent", "error", undefined, firstError.message);
+        sendUpdate("sentiment", "error", undefined, firstError.message);
+        sendUpdate("style", "error", undefined, firstError.message);
+        sendUpdate("security", "error", undefined, firstError.message);
+        sendUpdate("complete", "error", undefined, "Consolidated analysis failed");
+        return;
+      }
     }
 
     // Emit individual phase completions from the consolidated result (for UI compatibility)
@@ -195,13 +249,14 @@ export async function runAnalysisJob(
         anthropic: !!apiKeys.anthropic
       };
 
-      const fullContext = conversationHistory.length > 0
-        ? `${conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\nuser: ${message}`
-        : message;
+      const fullContext = safeHistory.length > 0
+        ? `${safeHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\nuser: ${safeMessage}`
+        : safeMessage;
 
       // Try dynamic router first, fall back to hardcoded selection
+      // (router uses original message for regex matching — no PII sent externally)
       const routerResult = await evaluateRules(
-        { message, analysis, availableProviders },
+        { message: safeMessage, analysis, availableProviders },
         job.orgId,
         job.userId
       );
@@ -257,8 +312,8 @@ export async function runAnalysisJob(
     sendUpdate("prompt", "processing");
     try {
       const result = await optimizePrompt(
-        message,
-        conversationHistory,
+        safeMessage, // Redacted — PII never leaves AI Helm
+        safeHistory,
         analysis.intent,
         analysis.sentiment,
         analysis.style,
@@ -268,8 +323,9 @@ export async function runAnalysisJob(
       results.optimizedPrompt = result.optimizedPrompt;
       sendUpdate("prompt", "completed", { optimizedPrompt: result.optimizedPrompt });
     } catch (error: any) {
-      sendUpdate("prompt", "error", undefined, error.message);
-      results.optimizedPrompt = message; // Fallback to original
+      console.warn(`Prompt optimization failed: ${error.message}`);
+      results.optimizedPrompt = safeMessage; // Fallback to redacted message
+      sendUpdate("prompt", "completed", { optimizedPrompt: safeMessage, fallback: true });
     }
 
     // ========================================================================
@@ -289,8 +345,9 @@ export async function runAnalysisJob(
       results.parameters = parametersResult;
       sendUpdate("parameters", "completed", { parameters: parametersResult });
     } catch (error: any) {
-      sendUpdate("parameters", "error", undefined, error.message);
+      console.warn(`Parameter tuning failed: ${error.message}`);
       results.parameters = { temperature: 0.7, top_p: 1.0, max_tokens: 1000 };
+      sendUpdate("parameters", "completed", { parameters: results.parameters, fallback: true });
     }
 
     // ========================================================================
@@ -312,7 +369,7 @@ export async function runAnalysisJob(
       try {
         aiResponse = await generateResponseStream(
           results.optimizedPrompt,
-          conversationHistory,
+          safeHistory,
           currentModel.provider,
           currentModel.model,
           currentParameters,
@@ -337,7 +394,7 @@ export async function runAnalysisJob(
       sendUpdate("validating", "processing");
       try {
         const validation = await validateResponse(
-          message,
+          safeMessage,
           results.intent,
           aiResponse,
           analysisModel,
@@ -399,13 +456,20 @@ export async function runAnalysisJob(
 
         // Recalculate cost estimate for the new model
         const estimatedInputTokens = Math.ceil(
-          (results.optimizedPrompt.length + conversationHistory.reduce((sum, m) => sum + m.content.length, 0)) / 4
+          (results.optimizedPrompt.length + safeHistory.reduce((sum, m) => sum + m.content.length, 0)) / 4
         );
         results.estimatedCost = estimateCost(currentModel, estimatedInputTokens, 500);
 
       } catch (error: any) {
-        // Validation failed to run — accept the response as-is
-        sendUpdate("validating", "error", undefined, error.message);
+        // Validation failed to run — accept the response as-is (non-fatal)
+        console.warn(`Validation call failed: ${error.message}`);
+        sendUpdate("validating", "completed", {
+          passed: true,
+          validation: "Validation skipped due to error",
+          userSummary: "Response delivered without validation",
+          skipped: true,
+          skipReason: error.message,
+        });
         sendUpdate("response", "completed", { response: aiResponse });
         sendUpdate("complete", "completed");
         break;

@@ -71,6 +71,21 @@ const exploitationPatterns = [
   /circumvent\s+(the\s+)?(safety|content)\s+filter/i,
 ];
 
+/** Social engineering and sensitive data request patterns */
+const socialEngineeringPatterns = [
+  // Authority impersonation / urgency
+  /\b(this\s+is\s+(your\s+)?(boss|ceo|manager|director|supervisor|cto|cfo))\b/i,
+  /\b(i\s+am\s+(your|the)\s+(boss|ceo|manager|director|supervisor|admin))\b/i,
+  /\b(urgent|emergency|immediately|right\s+now|asap)\b[\s\S]{0,80}\b(send|give|share|provide|transfer)\b/i,
+  // Sensitive data requests
+  /\b(bank|routing|account)\s+(number|info|detail|credential)/i,
+  /\b(credit\s+card|social\s+security|ssn|password|credential|api\s+key|secret\s+key)\b/i,
+  /\b(send|wire|transfer)\s+(money|funds|payment|bitcoin|crypto)/i,
+  // Phishing / impersonation patterns
+  /\b(verify|confirm|update)\s+(your|account)\s+(password|credential|identity|information)/i,
+  /\bclick\s+(this|the)\s+(link|url)\s+to\s+(verify|confirm|update|secure)/i,
+];
+
 /**
  * Run regex-based security pre-check. Returns a floor score that the AI
  * analysis cannot go below.
@@ -94,6 +109,24 @@ function securityPreCheck(message: string): { floorScore: number; flags: string[
         flags.push("Exploitation learning pattern detected");
         break;
       }
+    }
+  }
+
+  if (floorScore < 6) {
+    let socialEngFlags = 0;
+    for (const pattern of socialEngineeringPatterns) {
+      if (pattern.test(message)) {
+        socialEngFlags++;
+      }
+    }
+    if (socialEngFlags >= 2) {
+      // Multiple social engineering signals → high confidence
+      floorScore = Math.max(floorScore, 6);
+      flags.push("Social engineering pattern detected");
+    } else if (socialEngFlags === 1) {
+      // Single signal → moderate concern
+      floorScore = Math.max(floorScore, 4);
+      flags.push("Potential social engineering indicator");
     }
   }
 
@@ -256,13 +289,16 @@ async function runFallbackAnalysis(
     analyzeStyle(message, model, apiKey).catch(() => ({ style: "neutral" })),
   ]);
 
-  // Security depends on intent
+  // Security depends on intent — use cautious default on failure (floor score or 3, whichever is higher)
   const securityResult = await analyzeSecurityRisk(
     message,
     intentResult.intent,
     model,
     apiKey
-  ).catch(() => ({ score: securityFloorScore, explanation: "Analysis unavailable" }));
+  ).catch(() => ({
+    score: Math.max(securityFloorScore, 3),
+    explanation: "Analysis unavailable — elevated to moderate risk as a precaution",
+  }));
 
   // Apply floor score
   const finalSecurityScore = Math.max(securityResult.score, securityFloorScore);

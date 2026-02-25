@@ -24,6 +24,12 @@ export const organizations = pgTable("organizations", {
     securityThreshold: number;
     defaultModelPreferences?: Record<string, string[]>;
     costBudgetMonthly?: number;
+    /** Rate limits for org-level API keys (more generous than demo limits) */
+    orgRateLimits?: {
+      maxPerUserPerHour: number;
+      maxPerIPPerHour: number;
+      dailyBudgetUsd: number;
+    };
   }>().default({ securityThreshold: 8 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -294,6 +300,7 @@ export const session = pgTable("session", {
 // ============================================================================
 
 export const insertOrganizationSchema = createInsertSchema(organizations).pick({
+  id: true,       // Allow specifying ID (e.g., for the default demo org)
   name: true,
   settings: true,
 });

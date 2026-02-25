@@ -125,7 +125,9 @@ export default function Home() {
       setConversationId(payload.conversationId);
     }
 
-    if (phase === "started") {
+    if (phase === "dlp_warning" && status === "completed") {
+      addLog(`\u26a0\ufe0f DLP Warning: ${payload.summary}. Sensitive data has been redacted — it will not be sent to any AI provider.`, "warning");
+    } else if (phase === "started") {
       addLog("Starting intelligent analysis pipeline...", "info");
       setAnalysisData({} as AnalysisData);
     } else if (phase === "intent" && status === "completed") {

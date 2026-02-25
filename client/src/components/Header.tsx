@@ -34,30 +34,26 @@ export default function Header() {
           Universal AI Interface
         </div>
 
-        {authRequired && isAuthenticated && (
-          <>
-            <Link href="/router">
-              <Button variant="ghost" size="sm" className="text-xs gap-1">
-                <Network className="h-4 w-4" />
-                <span className="hidden md:inline">Router</span>
-              </Button>
-            </Link>
-            <Link href="/learn">
-              <Button variant="ghost" size="sm" className="text-xs gap-1">
-                <GraduationCap className="h-4 w-4" />
-                <span className="hidden md:inline">Learn</span>
-              </Button>
-            </Link>
-            <ProgressPopover />
-            {isAdmin && (
-              <Link href="/admin">
-                <Button variant="ghost" size="sm" className="text-xs gap-1">
-                  <LayoutDashboard className="h-4 w-4" />
-                  <span className="hidden md:inline">Admin</span>
-                </Button>
-              </Link>
-            )}
-          </>
+        <Link href="/router">
+          <Button variant="ghost" size="sm" className="text-xs gap-1">
+            <Network className="h-4 w-4" />
+            <span className="hidden md:inline">Router</span>
+          </Button>
+        </Link>
+        <Link href="/learn">
+          <Button variant="ghost" size="sm" className="text-xs gap-1">
+            <GraduationCap className="h-4 w-4" />
+            <span className="hidden md:inline">Learn</span>
+          </Button>
+        </Link>
+        {(isAuthenticated || !authRequired) && <ProgressPopover />}
+        {(isAdmin || !authRequired) && (
+          <Link href="/admin">
+            <Button variant="ghost" size="sm" className="text-xs gap-1">
+              <LayoutDashboard className="h-4 w-4" />
+              <span className="hidden md:inline">Admin</span>
+            </Button>
+          </Link>
         )}
 
         <Link href="/settings">

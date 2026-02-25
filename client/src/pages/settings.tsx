@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,9 +49,46 @@ function maskKey(key: string): string {
   return key.slice(0, 4) + "••••" + key.slice(-4);
 }
 
+/** Compact status dot for provider health indicators */
+function StatusDot({ status }: { status?: string }) {
+  if (!status) return null;
+  const colors: Record<string, string> = {
+    operational: "bg-green-500",
+    degraded: "bg-yellow-500",
+    partial_outage: "bg-orange-500",
+    major_outage: "bg-red-500",
+    unknown: "bg-gray-400",
+  };
+  const labels: Record<string, string> = {
+    operational: "Operational",
+    degraded: "Degraded",
+    partial_outage: "Partial outage",
+    major_outage: "Major outage",
+    unknown: "Status unknown",
+  };
+  return (
+    <span
+      className={`inline-block h-2 w-2 rounded-full ${colors[status] || colors.unknown}`}
+      title={labels[status] || "Unknown status"}
+    />
+  );
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const { isAuthenticated, authRequired } = useAuth();
+
+  // Fetch provider health status for inline indicators
+  const { data: healthData } = useQuery({
+    queryKey: ["providerHealth"],
+    queryFn: async () => {
+      const res = await fetch("/api/providers/status");
+      if (!res.ok) return null;
+      return res.json();
+    },
+    staleTime: 60000,
+    refetchInterval: 120000,
+  });
 
   // The actual key values (real text when fresh, real text from storage when loaded)
   const [keys, setKeys] = useState<APIKeys>({
@@ -278,6 +316,7 @@ export default function Settings() {
     const status = keyStatus[provider];
     const keyValue = keys[provider];
     const isShowing = showKeys[provider];
+    const providerStatus = healthData?.providers?.[provider]?.status;
 
     // For non-fresh keys, display masked value in the input
     const displayValue = isFresh ? keyValue : (keyValue ? maskKey(keyValue) : "");
@@ -287,6 +326,7 @@ export default function Settings() {
         <Label htmlFor={`${provider}-key`} className="flex items-center gap-2">
           <Key className="h-4 w-4" />
           {label}
+          <StatusDot status={providerStatus} />
           <span className="text-xs text-muted-foreground">
             ({recommended ? "Recommended" : "Optional"})
           </span>

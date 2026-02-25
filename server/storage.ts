@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, gte, count, sum } from "drizzle-orm";
+import { eq, and, desc, sql, gte, count, sum, avg } from "drizzle-orm";
 import { getDb, isDatabaseAvailable } from "./db";
 import {
   organizations,
@@ -113,7 +113,13 @@ export interface IStorage {
     activeUsers: number;
     securityHalts: number;
   }>;
-  getModelUsageStats(orgId: string): Promise<Array<{ model: string; count: number; totalCost: number }>>;
+  getModelUsageStats(orgId: string): Promise<Array<{
+    model: string;
+    provider: string;
+    count: number;
+    totalCost: number;
+    avgResponseTimeMs: number;
+  }>>;
 }
 
 // ============================================================================
@@ -557,7 +563,13 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getModelUsageStats(orgId: string): Promise<Array<{ model: string; count: number; totalCost: number }>> {
+  async getModelUsageStats(orgId: string): Promise<Array<{
+    model: string;
+    provider: string;
+    count: number;
+    totalCost: number;
+    avgResponseTimeMs: number;
+  }>> {
     const orgUsers = await this.db
       .select({ id: users.id })
       .from(users)
@@ -570,17 +582,21 @@ export class DatabaseStorage implements IStorage {
     const results = await this.db
       .select({
         model: analysisLogs.selectedModel,
+        provider: analysisLogs.modelProvider,
         count: count(analysisLogs.id),
         totalCost: sum(analysisLogs.actualCost),
+        avgResponseTimeMs: avg(analysisLogs.responseTimeMs),
       })
       .from(analysisLogs)
       .where(sql`${analysisLogs.userId} = ANY(${userIds})`)
-      .groupBy(analysisLogs.selectedModel);
+      .groupBy(analysisLogs.selectedModel, analysisLogs.modelProvider);
 
     return results.map(r => ({
       model: r.model ?? "unknown",
+      provider: r.provider ?? "unknown",
       count: Number(r.count),
       totalCost: Number(r.totalCost ?? 0),
+      avgResponseTimeMs: Math.round(Number(r.avgResponseTimeMs ?? 0)),
     }));
   }
 }

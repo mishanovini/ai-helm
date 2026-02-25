@@ -165,9 +165,9 @@ describe("getFamilyByModelId", () => {
 
 describe("resolveAlias", () => {
   it("should resolve aliases to default model IDs", () => {
-    expect(resolveAlias("gemini-pro")).toBe("gemini-2.5-pro");
-    expect(resolveAlias("claude-sonnet")).toBe("claude-sonnet-4-5");
-    expect(resolveAlias("gpt")).toBe("gpt-5");
+    expect(resolveAlias("gemini-pro")).toBe("gemini-3.1-pro-preview");
+    expect(resolveAlias("claude-sonnet")).toBe("claude-sonnet-4-6");
+    expect(resolveAlias("gpt")).toBe("gpt-5.2");
   });
 
   it("should return raw model IDs unchanged (backwards compat)", () => {
@@ -180,9 +180,9 @@ describe("resolveAlias", () => {
   });
 
   it("should reflect updates from updateResolvedModel", () => {
-    expect(resolveAlias("gemini-pro")).toBe("gemini-2.5-pro");
-    updateResolvedModel("gemini-pro", "gemini-3.0-pro");
-    expect(resolveAlias("gemini-pro")).toBe("gemini-3.0-pro");
+    expect(resolveAlias("gemini-pro")).toBe("gemini-3.1-pro-preview");
+    updateResolvedModel("gemini-pro", "gemini-4.0-pro");
+    expect(resolveAlias("gemini-pro")).toBe("gemini-4.0-pro");
   });
 });
 
@@ -237,8 +237,8 @@ describe("resetToDefaults", () => {
     updateResolvedModel("gemini-pro", "gemini-99.0-pro");
     updateResolvedModel("gpt", "gpt-99");
     resetToDefaults();
-    expect(resolveAlias("gemini-pro")).toBe("gemini-2.5-pro");
-    expect(resolveAlias("gpt")).toBe("gpt-5");
+    expect(resolveAlias("gemini-pro")).toBe("gemini-3.1-pro-preview");
+    expect(resolveAlias("gpt")).toBe("gpt-5.2");
   });
 });
 
@@ -258,6 +258,7 @@ describe("idPattern matching", () => {
     const family = getModelFamily("gemini-flash")!;
     expect(family.idPattern.test("gemini-2.5-flash")).toBe(true);
     expect(family.idPattern.test("gemini-3.0-flash")).toBe(true);
+    expect(family.idPattern.test("gemini-3-flash-preview")).toBe(true);
     // flash-lite should NOT match the flash pattern ($ anchor)
     expect(family.idPattern.test("gemini-2.5-flash-lite")).toBe(false);
   });
@@ -265,6 +266,7 @@ describe("idPattern matching", () => {
   it("gpt pattern should match base GPT models", () => {
     const family = getModelFamily("gpt")!;
     expect(family.idPattern.test("gpt-5")).toBe(true);
+    expect(family.idPattern.test("gpt-5.2")).toBe(true);
     expect(family.idPattern.test("gpt-6")).toBe(true);
     expect(family.idPattern.test("gpt-5-nano")).toBe(false);
     expect(family.idPattern.test("gpt-5-mini")).toBe(false);

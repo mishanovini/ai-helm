@@ -18,7 +18,11 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 **Admin Console** - Organization analytics, cost analysis, model performance metrics, user management, API key approval workflows, demo API key management with encrypted persistence, and users-needing-attention alerts. Accessible via ADMIN_SECRET in no-auth/demo mode.
 
+**Data Loss Prevention (DLP)** - Automatic detection and redaction of sensitive data (credit cards, SSNs, API keys, emails, phone numbers, IBANs, IPs) before any message reaches an AI provider. Validated with Luhn checks and pattern-specific rules to minimize false positives. Users see a warning; sensitive data never leaves the server.
+
 **Privacy-First Architecture** - User-provided API keys stored locally in browser, never on servers. Optional server-side AES-256-GCM encryption for org-managed keys. API keys validated before saving with per-key inline validation, and Show Key button secured to only reveal freshly-entered keys.
+
+**Provider Health Monitoring** - Real-time operational status of OpenAI, Anthropic, and Google Gemini fetched from their public status APIs. Displayed in the admin Health tab and as inline status indicators on the Settings page. Cached for 5 minutes with auto-refresh.
 
 **Conversation Persistence** - Full conversation history with search, sidebar navigation, and WebSocket message saving.
 
@@ -78,7 +82,11 @@ If authentication is enabled (`REQUIRE_AUTH=true`), you'll be prompted to sign i
 ```
 User Prompt
     |
-Consolidated Analysis (single LLM call)
+DLP Scan (detect & redact sensitive data)
+    |-- Credit cards, SSNs, API keys, emails, phones, IBANs, IPs
+    |-- Warn user if PII detected; redact for all downstream calls
+    |
+Consolidated Analysis (single LLM call, using redacted message)
     |-- Intent Detection
     |-- Sentiment Analysis
     |-- Style Inference
@@ -136,6 +144,8 @@ ai-helm/
 |   |-- dynamic-router.ts      # Rule engine + NL editing
 |   |-- response-generator.ts  # Multi-provider streaming
 |   |-- encryption.ts          # AES-256-GCM for API keys
+|   |-- dlp-scanner.ts         # Data Loss Prevention (PII detection & redaction)
+|   |-- provider-status.ts     # Real-time provider health monitoring
 |   |-- demo-budget.ts         # Demo mode rate limiter + budget tracker
 |   |-- model-discovery.ts     # Auto-discovery of latest model versions
 |   |-- db.ts                  # Database connection (lazy init)
@@ -246,6 +256,9 @@ See the [Demo Mode](#demo-mode) section below for details.
 ### User Progress
 - `GET /api/progress` - Current user's progress
 
+### Provider Status
+- `GET /api/providers/status` - Real-time operational status of all AI providers (no auth required)
+
 ### Demo
 - `GET /api/demo-status` - Demo mode status (no auth required)
 
@@ -287,6 +300,8 @@ Test coverage includes:
 - **Consolidated analysis** (33 tests) - schema validation, security regex patterns, JSON parsing
 - **Demo budget** (23 tests) - per-session and per-IP rate limiting, daily budget cap, midnight reset, status reporting
 - **Model aliases & discovery** (35 tests) - alias registry, pattern matching, resolution, reverse lookup, update/reset
+- **DLP scanner** (26 tests) - credit card (Luhn), SSN, API key, email, phone, IP detection, false-positive filtering, redaction
+- **Provider status** (19 tests) - Atlassian/Google API parsing, degraded/outage detection, caching, error handling
 
 ## Demo Mode
 

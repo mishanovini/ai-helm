@@ -2,13 +2,15 @@
  * Model Alias System
  *
  * Maps version-free aliases (e.g., "gemini-pro") to actual provider API model IDs
- * (e.g., "gemini-2.5-pro"). The resolved model IDs are updated automatically by
- * the model discovery service, which polls provider APIs every 24 hours.
+ * (e.g., "gemini-3.1-pro-preview"). The resolved model IDs are updated automatically
+ * by the model discovery service, which polls provider APIs every 24 hours.
  *
  * Why aliases?
  * - Providers release new model versions frequently
- * - Code shouldn't need updates when "gemini-2.5-pro" becomes "gemini-3.0-pro"
+ * - Code shouldn't need updates when "gemini-3.1-pro" becomes "gemini-4.0-pro"
  * - The alias registry is the single source of truth for model metadata
+ *
+ * Last updated: 2026-02-24
  */
 
 import type { Provider } from "./types";
@@ -70,9 +72,9 @@ const MODEL_FAMILIES: ModelFamily[] = [
     speedTier: "fast",
     contextWindow: 1_000_000,
     strengths: ["balanced", "multimodal", "production", "agents"],
-    idPattern: /^gemini-[\d.]+-flash$/,
-    defaultModelId: "gemini-2.5-flash",
-    pricing: { input: 0.30, output: 2.50 },
+    idPattern: /^gemini-[\d.]+-flash(?:-preview)?$/,
+    defaultModelId: "gemini-3-flash-preview",
+    pricing: { input: 0.50, output: 3.00 },
   },
   {
     alias: "gemini-pro",
@@ -81,10 +83,10 @@ const MODEL_FAMILIES: ModelFamily[] = [
     costTier: "medium",
     speedTier: "medium",
     contextWindow: 1_000_000,
-    strengths: ["math", "science", "long-context", "coding", "web-dev"],
+    strengths: ["math", "science", "long-context", "coding", "web-dev", "reasoning"],
     idPattern: /^gemini-[\d.]+-pro/,
-    defaultModelId: "gemini-2.5-pro",
-    pricing: { input: 1.25, output: 10.00 },
+    defaultModelId: "gemini-3.1-pro-preview",
+    pricing: { input: 2.00, output: 12.00 },
   },
 
   // OpenAI
@@ -94,11 +96,11 @@ const MODEL_FAMILIES: ModelFamily[] = [
     displayName: "GPT Nano",
     costTier: "ultra-low",
     speedTier: "ultra-fast",
-    contextWindow: 256_000,
+    contextWindow: 400_000,
     strengths: ["speed", "mobile", "edge", "high-volume"],
-    idPattern: /^gpt-\d+-nano/,
+    idPattern: /^gpt-[\d.]+-nano/,
     defaultModelId: "gpt-5-nano",
-    pricing: { input: 0.15, output: 1.50 },
+    pricing: { input: 0.05, output: 0.40 },
   },
   {
     alias: "gpt-mini",
@@ -106,11 +108,11 @@ const MODEL_FAMILIES: ModelFamily[] = [
     displayName: "GPT Mini",
     costTier: "low",
     speedTier: "fast",
-    contextWindow: 256_000,
+    contextWindow: 400_000,
     strengths: ["balanced", "cost-efficient", "general-purpose"],
-    idPattern: /^gpt-\d+-mini/,
+    idPattern: /^gpt-[\d.]+-mini/,
     defaultModelId: "gpt-5-mini",
-    pricing: { input: 0.50, output: 5.00 },
+    pricing: { input: 0.25, output: 2.00 },
   },
   {
     alias: "gpt",
@@ -118,11 +120,11 @@ const MODEL_FAMILIES: ModelFamily[] = [
     displayName: "GPT",
     costTier: "medium",
     speedTier: "medium",
-    contextWindow: 256_000,
-    strengths: ["conversation", "multimodal", "reasoning", "general"],
-    idPattern: /^gpt-\d+$/,
-    defaultModelId: "gpt-5",
-    pricing: { input: 2.00, output: 8.00 },
+    contextWindow: 400_000,
+    strengths: ["conversation", "multimodal", "reasoning", "agentic", "general"],
+    idPattern: /^gpt-[\d.]+$/,
+    defaultModelId: "gpt-5.2",
+    pricing: { input: 1.75, output: 14.00 },
   },
 
   // Anthropic
@@ -143,24 +145,24 @@ const MODEL_FAMILIES: ModelFamily[] = [
     provider: "anthropic",
     displayName: "Claude Sonnet",
     costTier: "medium",
-    speedTier: "medium",
+    speedTier: "fast",
     contextWindow: 200_000,
-    strengths: ["best-coding", "complex-agents", "system-design", "production"],
+    strengths: ["best-coding", "complex-agents", "system-design", "production", "agentic-search"],
     idPattern: /^claude-sonnet/,
-    defaultModelId: "claude-sonnet-4-5",
+    defaultModelId: "claude-sonnet-4-6",
     pricing: { input: 3.00, output: 15.00 },
   },
   {
     alias: "claude-opus",
     provider: "anthropic",
     displayName: "Claude Opus",
-    costTier: "premium",
-    speedTier: "slow",
+    costTier: "high",
+    speedTier: "medium",
     contextWindow: 200_000,
-    strengths: ["creative", "edge-cases", "code-review", "polish", "deep-reasoning"],
+    strengths: ["creative", "edge-cases", "code-review", "deep-reasoning", "agentic", "long-horizon"],
     idPattern: /^claude-opus/,
-    defaultModelId: "claude-opus-4-1",
-    pricing: { input: 15.00, output: 75.00 },
+    defaultModelId: "claude-opus-4-6",
+    pricing: { input: 5.00, output: 25.00 },
   },
 ];
 
