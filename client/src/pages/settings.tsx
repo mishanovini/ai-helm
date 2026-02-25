@@ -49,8 +49,11 @@ function maskKey(key: string): string {
   return key.slice(0, 4) + "••••" + key.slice(-4);
 }
 
-/** Compact status dot for provider health indicators */
-function StatusDot({ status }: { status?: string }) {
+/** Compact status dot for provider health indicators.
+ *  When status is not "operational" and a statusPageUrl is provided,
+ *  the dot becomes a clickable link to the provider's live status page.
+ */
+function StatusDot({ status, statusPageUrl }: { status?: string; statusPageUrl?: string }) {
   if (!status) return null;
   const colors: Record<string, string> = {
     operational: "bg-green-500",
@@ -61,16 +64,34 @@ function StatusDot({ status }: { status?: string }) {
   };
   const labels: Record<string, string> = {
     operational: "Operational",
-    degraded: "Degraded",
-    partial_outage: "Partial outage",
-    major_outage: "Major outage",
+    degraded: "Degraded — click for details",
+    partial_outage: "Partial outage — click for details",
+    major_outage: "Major outage — click for details",
     unknown: "Status unknown",
   };
-  return (
+  const dot = (
     <span
       className={`inline-block h-2 w-2 rounded-full ${colors[status] || colors.unknown}`}
-      title={labels[status] || "Unknown status"}
     />
+  );
+  // Link to status page when not operational
+  if (status !== "operational" && statusPageUrl) {
+    return (
+      <a
+        href={statusPageUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={labels[status] || "Unknown status"}
+        className="inline-flex items-center hover:opacity-75 transition-opacity"
+      >
+        {dot}
+      </a>
+    );
+  }
+  return (
+    <span title={labels[status] || "Unknown status"}>
+      {dot}
+    </span>
   );
 }
 
@@ -87,7 +108,6 @@ export default function Settings() {
       return res.json();
     },
     staleTime: 60000,
-    refetchInterval: 120000,
   });
 
   // The actual key values (real text when fresh, real text from storage when loaded)
@@ -317,6 +337,7 @@ export default function Settings() {
     const keyValue = keys[provider];
     const isShowing = showKeys[provider];
     const providerStatus = healthData?.providers?.[provider]?.status;
+    const providerStatusUrl = healthData?.providers?.[provider]?.statusPageUrl;
 
     // For non-fresh keys, display masked value in the input
     const displayValue = isFresh ? keyValue : (keyValue ? maskKey(keyValue) : "");
@@ -326,7 +347,7 @@ export default function Settings() {
         <Label htmlFor={`${provider}-key`} className="flex items-center gap-2">
           <Key className="h-4 w-4" />
           {label}
-          <StatusDot status={providerStatus} />
+          <StatusDot status={providerStatus} statusPageUrl={providerStatusUrl} />
           <span className="text-xs text-muted-foreground">
             ({recommended ? "Recommended" : "Optional"})
           </span>

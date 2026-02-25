@@ -289,7 +289,7 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <StatCard
                 icon={<MessageSquare className="h-5 w-5" />}
                 title="Total Messages"
@@ -310,6 +310,12 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
                 title="Security Halts"
                 value={overview?.securityHalts ?? 0}
                 variant={overview?.securityHalts > 0 ? "destructive" : "default"}
+              />
+              <StatCard
+                icon={<AlertTriangle className="h-5 w-5" />}
+                title="Provider Errors"
+                value={overview?.providerErrors ?? 0}
+                variant={overview?.providerErrors > 0 ? "destructive" : "default"}
               />
             </div>
 
@@ -1579,15 +1585,23 @@ const PROVIDER_INFO: Record<string, { label: string; color: string }> = {
 function ProviderHealthTab() {
   const queryClient = useQueryClient();
 
-  const { data: healthData, isLoading, dataUpdatedAt } = useQuery({
+  const { data: healthData, isLoading } = useQuery({
     queryKey: ["providerHealth"],
     queryFn: async () => {
       const res = await fetch("/api/providers/status");
       if (!res.ok) throw new Error("Failed to fetch provider status");
       return res.json();
     },
-    refetchInterval: 60000, // Auto-refresh every 60 seconds
     staleTime: 30000,
+  });
+
+  const { data: recentFailures } = useQuery({
+    queryKey: ["adminProviderFailures"],
+    queryFn: async () => {
+      const res = await adminFetch("/api/admin/analytics/provider-failures");
+      if (!res.ok) return [];
+      return res.json();
+    },
   });
 
   const providers = healthData?.providers;
@@ -1686,6 +1700,48 @@ function ProviderHealthTab() {
           )}
         </CardContent>
       </Card>
+
+      {/* Recent Provider Failures */}
+      {recentFailures && recentFailures.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Recent Provider Failures</CardTitle>
+            <CardDescription>
+              Generation failures that triggered automatic rerouting
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Failed Provider</TableHead>
+                  <TableHead>Failed Model</TableHead>
+                  <TableHead>Error</TableHead>
+                  <TableHead>Rerouted To</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentFailures.slice(0, 10).map((f: any, i: number) => (
+                  <TableRow key={i}>
+                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                      {new Date(f.timestamp).toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{f.provider}</Badge>
+                    </TableCell>
+                    <TableCell className="text-sm">{f.model}</TableCell>
+                    <TableCell className="text-sm text-destructive max-w-xs truncate">
+                      {f.error}
+                    </TableCell>
+                    <TableCell className="text-sm">{f.reroutedTo || "---"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

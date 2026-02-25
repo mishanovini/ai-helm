@@ -1,13 +1,15 @@
 import { useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { CheckCircle2, AlertCircle, Info, Loader2 } from "lucide-react";
+import { CheckCircle2, AlertCircle, Info, Loader2, ExternalLink } from "lucide-react";
 
 export interface LogEntry {
   id: string;
   timestamp: string;
   message: string;
   type: "info" | "success" | "warning" | "error" | "processing";
+  /** Optional link displayed after the message (e.g., provider status page) */
+  link?: { url: string; label: string };
 }
 
 interface ProcessLogProps {
@@ -91,6 +93,17 @@ export default function ProcessLog({ logs, isProcessing = false }: ProcessLogPro
                       {log.timestamp}
                     </span>
                     <span className={getTextColor(log.type)}>{log.message}</span>
+                    {log.link && (
+                      <a
+                        href={log.link.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 ml-2 text-primary hover:underline"
+                      >
+                        {log.link.label}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
                   </div>
                 </div>
               ))

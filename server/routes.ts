@@ -803,6 +803,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /** Recent provider failures from analysis logs (for admin Health tab) */
+  app.get("/api/admin/analytics/provider-failures", requireAdmin, async (req, res) => {
+    try {
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
+      if (!orgId) return res.status(401).json({ error: "Not authenticated" });
+
+      const failures = await storage.getRecentProviderFailures(orgId);
+      res.json(failures);
+    } catch (error: any) {
+      console.error("Admin provider failures error:", error);
+      res.status(500).json({ error: "Failed to get provider failures" });
+    }
+  });
+
   // List org users
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     try {

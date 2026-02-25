@@ -112,7 +112,15 @@ export interface IStorage {
     totalCost: number;
     activeUsers: number;
     securityHalts: number;
+    providerErrors: number;
   }>;
+  getRecentProviderFailures(orgId: string, limit?: number): Promise<Array<{
+    timestamp: string;
+    provider: string;
+    model: string;
+    error: string;
+    reroutedTo: string | null;
+  }>>;
   getModelUsageStats(orgId: string): Promise<Array<{
     model: string;
     provider: string;
@@ -518,6 +526,7 @@ export class DatabaseStorage implements IStorage {
     totalCost: number;
     activeUsers: number;
     securityHalts: number;
+    providerErrors: number;
   }> {
     // Get org user IDs
     const orgUsers = await this.db
@@ -526,7 +535,7 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.orgId, orgId));
 
     if (orgUsers.length === 0) {
-      return { totalMessages: 0, totalCost: 0, activeUsers: 0, securityHalts: 0 };
+      return { totalMessages: 0, totalCost: 0, activeUsers: 0, securityHalts: 0, providerErrors: 0 };
     }
 
     const userIds = orgUsers.map(u => u.id);
@@ -538,6 +547,9 @@ export class DatabaseStorage implements IStorage {
         totalCost: sum(analysisLogs.actualCost),
         securityHalts: count(
           sql`CASE WHEN ${analysisLogs.securityHalted} = true THEN 1 END`
+        ),
+        providerErrors: count(
+          sql`CASE WHEN ${analysisLogs.parameters}::jsonb ? 'providerFailures' THEN 1 END`
         ),
       })
       .from(analysisLogs)
@@ -560,7 +572,66 @@ export class DatabaseStorage implements IStorage {
       totalCost: Number(stats?.totalCost ?? 0),
       activeUsers: Number(activeResult?.activeUsers ?? 0),
       securityHalts: Number(stats?.securityHalts ?? 0),
+      providerErrors: Number(stats?.providerErrors ?? 0),
     };
+  }
+
+  async getRecentProviderFailures(orgId: string, limit: number = 20): Promise<Array<{
+    timestamp: string;
+    provider: string;
+    model: string;
+    error: string;
+    reroutedTo: string | null;
+  }>> {
+    const orgUsers = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.orgId, orgId));
+
+    if (orgUsers.length === 0) return [];
+    const userIds = orgUsers.map(u => u.id);
+
+    // Query logs that have providerFailures in their parameters jsonb
+    const logs = await this.db
+      .select({
+        createdAt: analysisLogs.createdAt,
+        parameters: analysisLogs.parameters,
+        selectedModel: analysisLogs.selectedModel,
+      })
+      .from(analysisLogs)
+      .where(
+        and(
+          sql`${analysisLogs.userId} = ANY(${userIds})`,
+          sql`${analysisLogs.parameters}::jsonb ? 'providerFailures'`
+        )
+      )
+      .orderBy(desc(analysisLogs.createdAt))
+      .limit(limit);
+
+    // Flatten: each log may contain multiple provider failures
+    const results: Array<{
+      timestamp: string;
+      provider: string;
+      model: string;
+      error: string;
+      reroutedTo: string | null;
+    }> = [];
+
+    for (const log of logs) {
+      const params = log.parameters as any;
+      const failures = params?.providerFailures || [];
+      for (const f of failures) {
+        results.push({
+          timestamp: f.timestamp || log.createdAt?.toISOString() || "",
+          provider: f.provider,
+          model: f.model,
+          error: f.error,
+          reroutedTo: log.selectedModel || null,
+        });
+      }
+    }
+
+    return results.slice(0, limit);
   }
 
   async getModelUsageStats(orgId: string): Promise<Array<{

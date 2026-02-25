@@ -91,7 +91,7 @@ export default function Home() {
     }
   }, [messages]);
 
-  const addLog = (message: string, type: LogEntry["type"]) => {
+  const addLog = (message: string, type: LogEntry["type"], link?: LogEntry["link"]) => {
     const timestamp = new Date().toLocaleTimeString('en-US', {
       hour12: false,
       hour: '2-digit',
@@ -102,7 +102,8 @@ export default function Home() {
       id: `${Date.now()}-${Math.random()}`,
       timestamp,
       message,
-      type
+      type,
+      ...(link ? { link } : {}),
     }]);
   };
 
@@ -247,6 +248,20 @@ export default function Home() {
           : m
       ));
       streamingMessageRef.current = "";
+    } else if (phase === "provider_error" && status === "processing") {
+      // Provider failed — rerouting to an alternative
+      const providerLabel =
+        payload.failedProvider === "openai" ? "OpenAI" :
+        payload.failedProvider === "anthropic" ? "Anthropic" :
+        payload.failedProvider === "gemini" ? "Google Gemini" :
+        payload.failedProvider;
+      addLog(
+        `${providerLabel} failed (${payload.error}). Rerouting to ${payload.nextModel}...`,
+        "warning",
+        payload.statusPageUrl
+          ? { url: payload.statusPageUrl, label: "View status" }
+          : undefined
+      );
     } else if (phase === "retrying" && status === "processing") {
       // Response failed quality check — server is retrying with a better model
       addLog(

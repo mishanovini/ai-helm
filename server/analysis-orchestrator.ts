@@ -14,6 +14,7 @@ import {
   AvailableProviders,
   ModelOption,
   type CostTier,
+  type Provider,
 } from "../shared/model-selection";
 import { evaluateRules } from "./dynamic-router";
 import { generateResponse, generateResponseStream } from "./response-generator";
@@ -351,16 +352,19 @@ export async function runAnalysisJob(
     }
 
     // ========================================================================
-    // Phase 5+6: Generate AI Response with Validation Retry
+    // Phase 5+6: Generate AI Response with Provider Failover + Validation Retry
     // ========================================================================
-    // If validation detects a poor response (refusal, off-topic, etc.),
-    // retry once with a more capable model and adjusted parameters.
+    // If generation fails (provider down, rate limit, auth error), reroute to
+    // an alternative provider. If validation detects a poor response, retry
+    // with a more capable model.
 
-    const MAX_RETRIES = 1;
+    const MAX_RETRIES = 2;
     let aiResponse = "";
     let currentModel: ModelOption = results.selectedModel;
     let currentParameters = { ...results.parameters };
     let retryCount = 0;
+    const failedProviders = new Set<Provider>();
+    const providerFailures: ProviderFailure[] = [];
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       // --- Phase 5: Generate ---
@@ -383,11 +387,60 @@ export async function runAnalysisJob(
         sendUpdate("generating", "completed", {
           message: `Response generated using ${currentModel.displayName} (${results.estimatedCost.displayText})`
         });
-      } catch (error: any) {
-        sendUpdate("generating", "error", undefined, error.message);
-        sendUpdate("response", "error", undefined, error.message);
-        hasError = true;
-        break;
+      } catch (generationError: any) {
+        // Track this provider failure
+        failedProviders.add(currentModel.provider);
+        providerFailures.push({
+          provider: currentModel.provider,
+          model: currentModel.model,
+          error: generationError.message,
+          timestamp: new Date().toISOString(),
+        });
+
+        console.warn(
+          `Generation failed with ${currentModel.provider}/${currentModel.model}: ${generationError.message}`
+        );
+
+        // Try to find an alternative model from a different provider
+        const alternative = selectAlternativeModel(
+          currentModel,
+          availableModels,
+          failedProviders
+        );
+
+        if (!alternative) {
+          // No alternatives — break with error
+          sendUpdate("generating", "error", undefined, generationError.message);
+          sendUpdate("response", "error", undefined, generationError.message);
+          hasError = true;
+          break;
+        }
+
+        // Notify client about provider failure and rerouting (include status page URL)
+        sendUpdate("provider_error", "processing", {
+          failedProvider: currentModel.provider,
+          failedModel: currentModel.displayName,
+          error: generationError.message,
+          nextProvider: alternative.provider,
+          nextModel: alternative.displayName,
+          statusPageUrl: PROVIDER_STATUS_URLS[currentModel.provider],
+        });
+
+        // Clear any partial streamed response
+        sendUpdate("response_clear", "processing");
+
+        // Switch to alternative model
+        currentModel = alternative;
+        retryCount++;
+
+        // Recalculate cost estimate
+        const estimatedInputTokens = Math.ceil(
+          (results.optimizedPrompt.length +
+            safeHistory.reduce((sum, m) => sum + m.content.length, 0)) / 4
+        );
+        results.estimatedCost = estimateCost(currentModel, estimatedInputTokens, 500);
+
+        continue; // Retry with the alternative model
       }
 
       // --- Phase 6: Validate ---
@@ -529,7 +582,10 @@ export async function runAnalysisJob(
           promptClarity: analysis.promptQuality.clarity,
           promptSpecificity: analysis.promptQuality.specificity,
           promptActionability: analysis.promptQuality.actionability,
-          parameters: results.parameters,
+          parameters: {
+            ...results.parameters,
+            ...(providerFailures.length > 0 ? { providerFailures } : {}),
+          } as any,
           responseTimeMs,
         });
 
@@ -580,7 +636,7 @@ const COST_TIER_ORDER: Record<CostTier, number> = {
  * Select a more capable model from available models by upgrading to the next
  * cost tier. Returns null if no upgrade is available.
  */
-function selectUpgradeModel(
+export function selectUpgradeModel(
   currentModel: ModelOption,
   availableModels: ModelOption[]
 ): ModelOption | null {
@@ -591,4 +647,53 @@ function selectUpgradeModel(
     .sort((a, b) => (COST_TIER_ORDER[a.costTier] ?? 0) - (COST_TIER_ORDER[b.costTier] ?? 0));
 
   return upgrades[0] || null;
+}
+
+/** Tracks a provider failure during the generation phase for analytics */
+export interface ProviderFailure {
+  provider: string;
+  model: string;
+  error: string;
+  timestamp: string;
+}
+
+/** Status page URLs for each provider — used in failure notifications */
+export const PROVIDER_STATUS_URLS: Record<Provider, string> = {
+  openai: "https://status.openai.com",
+  anthropic: "https://status.claude.com",
+  gemini: "https://status.cloud.google.com",
+};
+
+/**
+ * Select the best alternative model from a different provider than any that
+ * have already failed. Used when generateResponseStream throws due to provider
+ * issues (rate limit, auth error, outage).
+ *
+ * Scores candidates by cost-tier similarity and strength overlap with the
+ * failed model, preferring the closest capability match at a similar price.
+ */
+export function selectAlternativeModel(
+  failedModel: ModelOption,
+  availableModels: ModelOption[],
+  excludeProviders: Set<Provider>
+): ModelOption | null {
+  const candidates = availableModels.filter(
+    m => !excludeProviders.has(m.provider)
+  );
+
+  if (candidates.length === 0) return null;
+
+  const failedTier = COST_TIER_ORDER[failedModel.costTier] ?? 0;
+  const failedStrengths = new Set(failedModel.strengths);
+
+  const scored = candidates.map(m => {
+    const tierDiff = Math.abs((COST_TIER_ORDER[m.costTier] ?? 0) - failedTier);
+    const strengthOverlap = m.strengths.filter(s => failedStrengths.has(s)).length;
+    // Lower score = better match. Tier distance weighted more than strength overlap.
+    const score = tierDiff * 10 - strengthOverlap * 3;
+    return { model: m, score };
+  });
+
+  scored.sort((a, b) => a.score - b.score);
+  return scored[0].model;
 }
