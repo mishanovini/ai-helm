@@ -18,6 +18,7 @@ import {
 } from "../shared/model-selection";
 import { evaluateRules } from "./dynamic-router";
 import { generateResponse, generateResponseStream } from "./response-generator";
+import { buildSystemContext } from "./system-context";
 import { storage } from "./storage";
 import type { APIKeys, ConversationMessage, AnalysisUpdate, ConsolidatedAnalysisResult } from "../shared/types";
 
@@ -33,6 +34,8 @@ export interface AnalysisJob {
   orgId?: string | null;
   conversationId?: string | null;
   signal?: AbortSignal;
+  /** System prompt from an active AI assistant preset (Phase D) */
+  systemPrompt?: string | null;
 }
 
 // Default security threshold if org settings not available
@@ -352,6 +355,19 @@ export async function runAnalysisJob(
     }
 
     // ========================================================================
+    // Phase 4.5: Build System Context
+    // ========================================================================
+    // Constructs the system prompt from base context, user history, and
+    // any active AI assistant preset. Injected per-provider in generation.
+
+    let resolvedSystemPrompt: string | undefined;
+    try {
+      resolvedSystemPrompt = await buildSystemContext(job.userId, job.systemPrompt);
+    } catch {
+      // Non-critical: proceed without system context
+    }
+
+    // ========================================================================
     // Phase 5+6: Generate AI Response with Provider Failover + Validation Retry
     // ========================================================================
     // If generation fails (provider down, rate limit, auth error), reroute to
@@ -381,7 +397,8 @@ export async function runAnalysisJob(
           (token: string) => {
             sendUpdate("response_chunk", "processing", { token });
           },
-          job.signal
+          job.signal,
+          resolvedSystemPrompt
         );
 
         sendUpdate("generating", "completed", {

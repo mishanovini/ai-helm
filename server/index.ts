@@ -6,6 +6,7 @@ import { setupAuth } from "./auth";
 import { isDatabaseAvailable } from "./db";
 import { ensureDemoOrg, isDemoMode, DEMO_ORG_ID } from "./demo-budget";
 import { seedDefaultConfig } from "./dynamic-router";
+import { seedPromptTemplates } from "./seed-templates";
 import { storage } from "./storage";
 
 const app = express();
@@ -28,6 +29,9 @@ if (isDatabaseAvailable()) {
         await seedDefaultConfig(DEMO_ORG_ID, "demo-system");
         log("Default router config seeded for demo org");
       }
+
+      // Seed prompt templates and AI assistant presets
+      await seedPromptTemplates();
     })
     .catch((err) => {
       console.error("[startup] Failed to ensure demo org:", err);

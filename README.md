@@ -32,6 +32,12 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 **Demo Mode** - Public-facing demo with server-provided API keys, three-tier abuse protection (per-session, per-IP, and daily budget rate limiting), and automatic key injection. Demo keys manageable via admin console with encrypted file persistence. Users with their own keys bypass all demo limits.
 
+**Beginner-Friendly Home Page** - Chat-dominant layout (70/30 split) with personalized welcome screen showing suggested prompts for new and returning users. Collapsible process log footer that shows real-time pipeline activity without overwhelming the interface. Analysis dashboard reordered by relevance: model+cost reasoning, prompt quality (always visible), optimized prompt, then collapsible details.
+
+**Prompt Library & AI Assistants** - Database-backed catalog of 10 prompt templates and 5 AI assistant presets (Code Tutor, Writing Coach, Research Assistant, Creative Brainstormer, Data Analyst). Browseable via a slide-out sheet with search, category filtering, and usage tracking. Templates fill the chat input; presets activate a custom system prompt for the conversation.
+
+**System Context Injection** - Three-layer system prompt construction: base context (what AI Helm is), user context (experience level and prompt quality trends), and preset context (active AI assistant persona). Injected per-provider: OpenAI system message, Anthropic system parameter, Gemini systemInstruction.
+
 ## Quick Start
 
 ### Prerequisites

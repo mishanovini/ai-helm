@@ -1,17 +1,59 @@
-import { useState } from "react";
+/**
+ * Chat Input — Message composer with prompt library access and preset indicator
+ *
+ * Features:
+ * - Textarea with Enter-to-send (Shift+Enter for newline)
+ * - Prompt library button (BookOpen icon) to browse templates
+ * - Active preset indicator badge above the input when a preset is active
+ * - Prefill support for welcome screen suggestions
+ * - Stop button during generation
+ */
+
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Square } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Send, Square, BookOpen, X, Bot } from "lucide-react";
+import type { ActivePreset } from "@/components/PromptLibrary";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
   onStop?: () => void;
   disabled?: boolean;
   isGenerating?: boolean;
+  /** When set, fills the input with this text (e.g., from prompt suggestions). Cleared after consumption. */
+  prefillMessage?: string;
+  /** Called after prefillMessage is consumed so the parent can reset its state */
+  onPrefillConsumed?: () => void;
+  /** Currently active AI assistant preset (if any) */
+  activePreset?: ActivePreset | null;
+  /** Called when user clears the active preset */
+  onClearPreset?: () => void;
+  /** Called when user clicks the prompt library button */
+  onOpenLibrary?: () => void;
 }
 
-export default function ChatInput({ onSendMessage, onStop, disabled, isGenerating }: ChatInputProps) {
+export default function ChatInput({
+  onSendMessage,
+  onStop,
+  disabled,
+  isGenerating,
+  prefillMessage,
+  onPrefillConsumed,
+  activePreset,
+  onClearPreset,
+  onOpenLibrary,
+}: ChatInputProps) {
   const [message, setMessage] = useState("");
+
+  // Fill input when a prefill message arrives (e.g., from welcome screen suggestions)
+  useEffect(() => {
+    if (prefillMessage) {
+      setMessage(prefillMessage);
+      onPrefillConsumed?.();
+    }
+  }, [prefillMessage, onPrefillConsumed]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,10 +72,51 @@ export default function ChatInput({ onSendMessage, onStop, disabled, isGeneratin
 
   return (
     <form onSubmit={handleSubmit} className="border-t bg-background/95 backdrop-blur p-4">
+      {/* Active preset indicator */}
+      {activePreset && (
+        <div className="flex items-center gap-2 mb-2">
+          <Badge variant="secondary" className="flex items-center gap-1.5 px-2.5 py-1 text-xs">
+            <Bot className="h-3 w-3 text-primary" />
+            <span className="font-medium">{activePreset.title}</span>
+          </Badge>
+          <button
+            type="button"
+            onClick={onClearPreset}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Clear active preset"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       <div className="flex gap-2 items-end">
+        {/* Prompt Library button */}
+        {onOpenLibrary && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={onOpenLibrary}
+                  className="shrink-0 h-9 w-9"
+                  data-testid="button-prompt-library"
+                >
+                  <BookOpen className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>Browse Prompt Library</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+
         <Textarea
           data-testid="input-prompt"
-          placeholder="Enter your prompt..."
+          placeholder={activePreset ? `Ask ${activePreset.title}...` : "Enter your prompt..."}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}

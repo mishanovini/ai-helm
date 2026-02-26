@@ -6,6 +6,8 @@ import ChatInput from "@/components/ChatInput";
 import AnalysisDashboard, { type AnalysisData } from "@/components/AnalysisDashboard";
 import ProcessLog, { type LogEntry } from "@/components/ProcessLog";
 import DeepResearchModal from "@/components/DeepResearchModal";
+import WelcomeScreen from "@/components/WelcomeScreen";
+import PromptLibrary, { type ActivePreset } from "@/components/PromptLibrary";
 import ConversationSidebar from "@/components/ConversationSidebar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
@@ -18,6 +20,7 @@ import { AlertCircle, Info, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import type { DemoStatus } from "@shared/types";
+import type { UserProgressSummary } from "@/lib/suggested-prompts";
 
 interface Message {
   id: string;
@@ -42,8 +45,23 @@ export default function Home() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const lastAssistantMessageRef = useRef<HTMLDivElement>(null);
   const streamingMessageRef = useRef<string>("");
+  const [prefillMessage, setPrefillMessage] = useState<string | undefined>(undefined);
+  const [showPromptLibrary, setShowPromptLibrary] = useState(false);
+  const [activePreset, setActivePreset] = useState<ActivePreset | null>(null);
 
   const showSidebar = authRequired && isAuthenticated;
+
+  // Fetch user progress for personalized welcome screen suggestions
+  const { data: userProgress } = useQuery<UserProgressSummary>({
+    queryKey: ["userProgress"],
+    queryFn: async () => {
+      const res = await fetch("/api/progress");
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+  });
 
   // Poll demo status to know if server provides demo keys
   const { data: demoStatus } = useQuery<DemoStatus>({
@@ -351,7 +369,8 @@ export default function Home() {
         conversationHistory: messages,
         conversationId,
         useDeepResearch,
-        apiKeys: userHasKeys ? apiKeys : { gemini: "", openai: "", anthropic: "" }
+        apiKeys: userHasKeys ? apiKeys : { gemini: "", openai: "", anthropic: "" },
+        ...(activePreset ? { presetId: activePreset.id, systemPrompt: activePreset.systemPrompt } : {}),
       }
     });
 
@@ -497,6 +516,29 @@ export default function Home() {
     setMessages([]);
     setAnalysisData(null);
     setLogs([]);
+    setActivePreset(null);
+  };
+
+  /** Activate an AI assistant preset — sets system prompt context + shows starter message */
+  const handleActivatePreset = (preset: ActivePreset) => {
+    // Start a fresh conversation with the preset active
+    handleNewChat();
+    setActivePreset(preset);
+
+    // Show the preset's starter message as a system greeting
+    if (preset.starterMessage) {
+      const timestamp = new Date().toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      setMessages([{
+        id: `preset-greeting-${Date.now()}`,
+        role: "assistant",
+        content: preset.starterMessage,
+        timestamp,
+      }]);
+    }
   };
 
   return (
@@ -570,84 +612,76 @@ export default function Home() {
         )}
 
         <div className="flex-1 overflow-hidden p-6">
-          <ResizablePanelGroup direction="vertical" className="h-full">
-            {/* Top Section: Chat + Dashboard */}
-            <ResizablePanel defaultSize={50} minSize={30}>
-              <ResizablePanelGroup direction="horizontal" className="h-full gap-6">
-                {/* Chat Area */}
-                <ResizablePanel defaultSize={60} minSize={40}>
-                  <div className="flex flex-col h-full">
-                    <ScrollArea className="flex-1 pr-4">
-                      <div className="space-y-4 pb-4">
-                        {messages.length === 0 ? (
-                          <div className="flex items-center justify-center h-64">
-                            <div className="text-center">
-                              <p className="text-muted-foreground mb-2">
-                                Welcome to AI Helm, your universal AI interface
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                We automatically select and fine-tune the optimal model for every prompt
-                              </p>
-                            </div>
-                          </div>
-                        ) : (
-                          messages.map((msg, index) => {
-                            const isLastAssistant = msg.role === "assistant" &&
-                              index === messages.length - 1;
-
-                            if (msg.role === "system") {
-                              return (
-                                <div key={msg.id} className="px-4 py-2">
-                                  <Alert variant="destructive">
-                                    <AlertCircle className="h-4 w-4" />
-                                    <AlertDescription className="text-sm">
-                                      {msg.content}
-                                    </AlertDescription>
-                                  </Alert>
-                                </div>
-                              );
-                            }
-
-                            return (
-                              <ChatMessage
-                                key={msg.id}
-                                ref={isLastAssistant ? lastAssistantMessageRef : null}
-                                role={msg.role}
-                                content={msg.content}
-                                timestamp={msg.timestamp}
-                              />
-                            );
-                          })
-                        )}
-                      </div>
-                    </ScrollArea>
-                    <div className="mt-4">
-                      <ChatInput
-                        onSendMessage={handleSendMessage}
-                        onStop={handleStop}
-                        disabled={isProcessing}
-                        isGenerating={isGenerating}
+          <ResizablePanelGroup direction="horizontal" className="h-full gap-6">
+            {/* Chat Area — dominant panel (70%) */}
+            <ResizablePanel defaultSize={70} minSize={50}>
+              <div className="flex flex-col h-full">
+                <ScrollArea className="flex-1 pr-4">
+                  <div className="space-y-4 pb-4">
+                    {messages.length === 0 ? (
+                      <WelcomeScreen
+                        onSelectPrompt={(text) => setPrefillMessage(text)}
+                        userProgress={userProgress ?? null}
+                        onOpenLibrary={() => setShowPromptLibrary(true)}
                       />
-                    </div>
+                    ) : (
+                      messages.map((msg, index) => {
+                        const isLastAssistant = msg.role === "assistant" &&
+                          index === messages.length - 1;
+
+                        if (msg.role === "system") {
+                          return (
+                            <div key={msg.id} className="px-4 py-2">
+                              <Alert variant="destructive">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertDescription className="text-sm">
+                                  {msg.content}
+                                </AlertDescription>
+                              </Alert>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <ChatMessage
+                            key={msg.id}
+                            ref={isLastAssistant ? lastAssistantMessageRef : null}
+                            role={msg.role}
+                            content={msg.content}
+                            timestamp={msg.timestamp}
+                          />
+                        );
+                      })
+                    )}
                   </div>
-                </ResizablePanel>
-
-                <ResizableHandle withHandle />
-
-                {/* Dashboard Area */}
-                <ResizablePanel defaultSize={40} minSize={30}>
-                  <ScrollArea className="h-full pr-4">
-                    <AnalysisDashboard data={analysisData} />
-                  </ScrollArea>
-                </ResizablePanel>
-              </ResizablePanelGroup>
+                </ScrollArea>
+                <div className="mt-4">
+                  <ChatInput
+                    onSendMessage={handleSendMessage}
+                    onStop={handleStop}
+                    disabled={isProcessing}
+                    isGenerating={isGenerating}
+                    prefillMessage={prefillMessage}
+                    onPrefillConsumed={() => setPrefillMessage(undefined)}
+                    activePreset={activePreset}
+                    onClearPreset={() => setActivePreset(null)}
+                    onOpenLibrary={() => setShowPromptLibrary(true)}
+                  />
+                </div>
+                {/* Process Log — collapsible footer */}
+                <div className="mt-2">
+                  <ProcessLog logs={logs} isProcessing={isProcessing} />
+                </div>
+              </div>
             </ResizablePanel>
 
             <ResizableHandle withHandle />
 
-            {/* Bottom Section: Process Log */}
-            <ResizablePanel defaultSize={50} minSize={20}>
-              <ProcessLog logs={logs} isProcessing={isProcessing} />
+            {/* Analysis Panel — narrower side panel (30%) */}
+            <ResizablePanel defaultSize={30} minSize={20}>
+              <ScrollArea className="h-full pr-4">
+                <AnalysisDashboard data={analysisData} />
+              </ScrollArea>
             </ResizablePanel>
           </ResizablePanelGroup>
         </div>
@@ -658,6 +692,13 @@ export default function Home() {
         onConfirm={handleDeepResearchConfirm}
         onUseFasterAlternative={handleUseFasterAlternative}
         estimatedTime="3-5 minutes"
+      />
+
+      <PromptLibrary
+        open={showPromptLibrary}
+        onOpenChange={setShowPromptLibrary}
+        onSelectPrompt={(text) => setPrefillMessage(text)}
+        onActivatePreset={handleActivatePreset}
       />
     </div>
   );

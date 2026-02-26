@@ -1180,6 +1180,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ========================================================================
+  // Prompt Templates (public — available without auth for demo mode)
+  // ========================================================================
+
+  /**
+   * List prompt templates with optional category/search/preset filters.
+   * Global templates are available to all users; org-scoped templates are
+   * available only to members of that organization.
+   */
+  app.get("/api/prompt-templates", async (req, res) => {
+    try {
+      const category = req.query.category as string | undefined;
+      const search = req.query.search as string | undefined;
+      const isPreset = req.query.preset === "true" ? true
+        : req.query.preset === "false" ? false
+        : undefined;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+
+      const templates = await storage.listPromptTemplates(
+        { category, search, isPreset },
+        limit
+      );
+      res.json(templates);
+    } catch (error: any) {
+      console.error("List prompt templates error:", error);
+      res.status(500).json({ error: "Failed to list prompt templates" });
+    }
+  });
+
+  /**
+   * Get popular prompt templates (sorted by usage count descending).
+   */
+  app.get("/api/prompt-templates/popular", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const templates = await storage.getPopularPromptTemplates(limit);
+      res.json(templates);
+    } catch (error: any) {
+      console.error("Popular prompt templates error:", error);
+      res.status(500).json({ error: "Failed to get popular templates" });
+    }
+  });
+
+  /**
+   * "Use" a prompt template — increments usage count and returns the
+   * full template (including promptText and systemPrompt for presets).
+   */
+  app.post("/api/prompt-templates/:id/use", async (req, res) => {
+    try {
+      const template = await storage.incrementTemplateUsage(req.params.id);
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+      res.json(template);
+    } catch (error: any) {
+      console.error("Use prompt template error:", error);
+      res.status(500).json({ error: "Failed to use template" });
+    }
+  });
+
+  // ========================================================================
   // WebSocket Setup
   // ========================================================================
 
@@ -1366,7 +1426,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             conversationHistory = [],
             conversationId = null,
             useDeepResearch = false,
-            apiKeys
+            apiKeys,
+            presetId = null,
+            systemPrompt: clientSystemPrompt = null,
           } = message.payload;
 
           if (!userMessage || typeof userMessage !== "string") {
@@ -1490,6 +1552,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               orgId,
               conversationId: activeConversationId,
               signal: abortController.signal,
+              systemPrompt: clientSystemPrompt,
             },
             ws
           );

@@ -124,6 +124,10 @@ export const conversations = pgTable("conversations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   title: text("title"),
+  /** Prompt template preset used for this conversation (Phase C) */
+  presetId: varchar("preset_id").references(() => promptTemplates.id),
+  /** Active system prompt for this conversation (Phase D — injected into LLM calls) */
+  systemPrompt: text("system_prompt"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -286,6 +290,38 @@ export const userProgressRelations = relations(userProgress, ({ one }) => ({
 }));
 
 // ============================================================================
+// Prompt Templates (prompt library + AI assistant presets)
+// ============================================================================
+
+export const promptTemplates = pgTable("prompt_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  category: text("category").notNull(), // "writing" | "coding" | "research" | "creative" | "productivity" | "learning" | "analysis"
+  promptText: text("prompt_text").notNull(),
+  /** System prompt injected into the conversation (presets only) */
+  systemPrompt: text("system_prompt"),
+  isPreset: boolean("is_preset").default(false).notNull(),
+  /** Lucide icon name (e.g., "Mail", "Code") for display in the UI */
+  icon: text("icon"),
+  tags: jsonb("tags").$type<string[]>().default([]),
+  /** Introductory message displayed when a preset is activated */
+  starterMessage: text("starter_message"),
+  orgId: varchar("org_id").references(() => organizations.id),
+  isGlobal: boolean("is_global").default(false).notNull(),
+  usageCount: integer("usage_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const promptTemplatesRelations = relations(promptTemplates, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [promptTemplates.orgId],
+    references: [organizations.id],
+  }),
+}));
+
+// ============================================================================
 // Session (for connect-pg-simple)
 // ============================================================================
 
@@ -332,6 +368,15 @@ export const insertApiKeySchema = createInsertSchema(apiKeys).pick({
 export const insertConversationSchema = createInsertSchema(conversations).pick({
   userId: true,
   title: true,
+  presetId: true,
+  systemPrompt: true,
+});
+
+export const insertPromptTemplateSchema = createInsertSchema(promptTemplates).omit({
+  id: true,
+  usageCount: true,
+  createdAt: true,
+  updatedAt: true,
 });
 
 export const insertMessageSchema = createInsertSchema(messages).pick({
@@ -389,3 +434,6 @@ export type RouterConfigHistoryEntry = typeof routerConfigHistory.$inferSelect;
 
 export type UserProgress = typeof userProgress.$inferSelect;
 export type InsertUserProgress = z.infer<typeof insertUserProgressSchema>;
+
+export type PromptTemplate = typeof promptTemplates.$inferSelect;
+export type InsertPromptTemplate = z.infer<typeof insertPromptTemplateSchema>;

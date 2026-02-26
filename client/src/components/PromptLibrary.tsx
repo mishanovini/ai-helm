@@ -1,0 +1,357 @@
+/**
+ * Prompt Library — Sheet-based browser for prompt templates and AI assistants
+ *
+ * Slides in from the right with two tabs:
+ * - "Prompt Templates" — browseable by category, clickable to fill chat input
+ * - "AI Assistants" — presets that activate a system prompt for the conversation
+ *
+ * Features a search bar, category filter chips, and cards showing title,
+ * description, usage count, and category badge.
+ */
+
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Search,
+  BookOpen,
+  Bot,
+  TrendingUp,
+  Mail,
+  Bug,
+  FileText,
+  GraduationCap,
+  Scale,
+  PenTool,
+  Baby,
+  ListChecks,
+  CheckSquare,
+  TestTube,
+  Pencil,
+  Sparkles,
+  BarChart3,
+  Code,
+  type LucideIcon,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Server-side prompt template shape */
+interface PromptTemplate {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  promptText: string;
+  systemPrompt: string | null;
+  isPreset: boolean;
+  icon: string | null;
+  tags: string[];
+  starterMessage: string | null;
+  usageCount: number;
+}
+
+/** Represents an active AI assistant preset */
+export interface ActivePreset {
+  id: string;
+  title: string;
+  systemPrompt: string;
+  starterMessage: string | null;
+  icon: string | null;
+}
+
+interface PromptLibraryProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Called when user selects a prompt template (fills chat input) */
+  onSelectPrompt: (promptText: string) => void;
+  /** Called when user activates an AI assistant preset */
+  onActivatePreset: (preset: ActivePreset) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Icon resolver: map icon name strings to Lucide components
+// ---------------------------------------------------------------------------
+
+const ICON_MAP: Record<string, LucideIcon> = {
+  Mail,
+  Bug,
+  FileText,
+  BookOpen,
+  Scale,
+  PenTool,
+  Baby,
+  ListChecks,
+  CheckSquare,
+  TestTube,
+  GraduationCap,
+  Pencil,
+  Search,
+  Sparkles,
+  BarChart3,
+  Code,
+  Bot,
+};
+
+function resolveIcon(name: string | null): LucideIcon {
+  if (!name) return BookOpen;
+  return ICON_MAP[name] ?? BookOpen;
+}
+
+// ---------------------------------------------------------------------------
+// Category labels and colors
+// ---------------------------------------------------------------------------
+
+const CATEGORIES = [
+  { value: "all", label: "All" },
+  { value: "writing", label: "Writing" },
+  { value: "coding", label: "Coding" },
+  { value: "research", label: "Research" },
+  { value: "creative", label: "Creative" },
+  { value: "productivity", label: "Productivity" },
+  { value: "learning", label: "Learning" },
+  { value: "analysis", label: "Analysis" },
+] as const;
+
+function getCategoryColor(category: string): string {
+  switch (category) {
+    case "writing": return "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
+    case "coding": return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
+    case "research": return "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300";
+    case "creative": return "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300";
+    case "productivity": return "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300";
+    case "learning": return "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300";
+    case "analysis": return "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300";
+    default: return "bg-muted text-muted-foreground";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Template Card
+// ---------------------------------------------------------------------------
+
+function TemplateCard({
+  template,
+  onClick,
+  actionLabel,
+}: {
+  template: PromptTemplate;
+  onClick: () => void;
+  actionLabel: string;
+}) {
+  const Icon = resolveIcon(template.icon);
+
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-start gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors text-left group cursor-pointer w-full"
+    >
+      <Icon className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 mb-1">
+          <p className="text-sm font-medium group-hover:text-primary transition-colors truncate">
+            {template.title}
+          </p>
+          <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 shrink-0", getCategoryColor(template.category))}>
+            {template.category}
+          </Badge>
+        </div>
+        <p className="text-xs text-muted-foreground line-clamp-2">{template.description}</p>
+        <div className="flex items-center gap-2 mt-1.5">
+          {template.usageCount > 0 && (
+            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+              <TrendingUp className="h-2.5 w-2.5" />
+              {template.usageCount} uses
+            </span>
+          )}
+          <span className="text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
+            {actionLabel} →
+          </span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main Component
+// ---------------------------------------------------------------------------
+
+export default function PromptLibrary({
+  open,
+  onOpenChange,
+  onSelectPrompt,
+  onActivatePreset,
+}: PromptLibraryProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState("all");
+
+  // Fetch all templates (cache for 5 minutes)
+  const { data: allTemplates = [] } = useQuery<PromptTemplate[]>({
+    queryKey: ["promptTemplates"],
+    queryFn: async () => {
+      const res = await fetch("/api/prompt-templates?limit=100");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 5 * 60_000,
+  });
+
+  // Split into prompts and presets, then filter
+  const { prompts, presets } = useMemo(() => {
+    const lower = searchQuery.toLowerCase();
+
+    const matchesSearch = (t: PromptTemplate) =>
+      !searchQuery ||
+      t.title.toLowerCase().includes(lower) ||
+      t.description.toLowerCase().includes(lower) ||
+      t.tags?.some(tag => tag.toLowerCase().includes(lower));
+
+    const matchesCategory = (t: PromptTemplate) =>
+      activeCategory === "all" || t.category === activeCategory;
+
+    return {
+      prompts: allTemplates
+        .filter(t => !t.isPreset && matchesSearch(t) && matchesCategory(t)),
+      presets: allTemplates
+        .filter(t => t.isPreset && matchesSearch(t) && matchesCategory(t)),
+    };
+  }, [allTemplates, searchQuery, activeCategory]);
+
+  /** Handle clicking a prompt template */
+  const handleUsePrompt = async (template: PromptTemplate) => {
+    // Fire-and-forget usage tracking
+    fetch(`/api/prompt-templates/${template.id}/use`, { method: "POST" }).catch(() => {});
+    onSelectPrompt(template.promptText);
+    onOpenChange(false);
+  };
+
+  /** Handle activating an AI assistant preset */
+  const handleActivatePreset = async (template: PromptTemplate) => {
+    fetch(`/api/prompt-templates/${template.id}/use`, { method: "POST" }).catch(() => {});
+    onActivatePreset({
+      id: template.id,
+      title: template.title,
+      systemPrompt: template.systemPrompt!,
+      starterMessage: template.starterMessage,
+      icon: template.icon,
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full sm:max-w-lg flex flex-col">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2">
+            <BookOpen className="h-5 w-5 text-primary" />
+            Prompt Library
+          </SheetTitle>
+          <SheetDescription>
+            Browse ready-made prompts or activate an AI assistant
+          </SheetDescription>
+        </SheetHeader>
+
+        {/* Search */}
+        <div className="relative mt-2">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search prompts..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+
+        {/* Category chips */}
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {CATEGORIES.map((cat) => (
+            <Button
+              key={cat.value}
+              variant={activeCategory === cat.value ? "default" : "outline"}
+              size="sm"
+              className="h-6 text-xs px-2"
+              onClick={() => setActiveCategory(cat.value)}
+            >
+              {cat.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* Tabs */}
+        <Tabs defaultValue="prompts" className="flex-1 flex flex-col mt-2 min-h-0">
+          <TabsList className="w-full">
+            <TabsTrigger value="prompts" className="flex-1 gap-1.5">
+              <BookOpen className="h-3.5 w-3.5" />
+              Prompts ({prompts.length})
+            </TabsTrigger>
+            <TabsTrigger value="assistants" className="flex-1 gap-1.5">
+              <Bot className="h-3.5 w-3.5" />
+              AI Assistants ({presets.length})
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="prompts" className="flex-1 min-h-0 mt-2">
+            <ScrollArea className="h-full">
+              <div className="space-y-2 pr-2 pb-4">
+                {prompts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    {searchQuery
+                      ? "No prompts match your search"
+                      : "No prompt templates available"}
+                  </p>
+                ) : (
+                  prompts.map((template) => (
+                    <TemplateCard
+                      key={template.id}
+                      template={template}
+                      onClick={() => handleUsePrompt(template)}
+                      actionLabel="Use prompt"
+                    />
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          <TabsContent value="assistants" className="flex-1 min-h-0 mt-2">
+            <ScrollArea className="h-full">
+              <div className="space-y-2 pr-2 pb-4">
+                {presets.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    {searchQuery
+                      ? "No assistants match your search"
+                      : "No AI assistants available"}
+                  </p>
+                ) : (
+                  presets.map((template) => (
+                    <TemplateCard
+                      key={template.id}
+                      template={template}
+                      onClick={() => handleActivatePreset(template)}
+                      actionLabel="Activate"
+                    />
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+        </Tabs>
+      </SheetContent>
+    </Sheet>
+  );
+}

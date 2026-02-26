@@ -11,6 +11,7 @@ import {
   routerConfigs,
   routerConfigHistory,
   userProgress,
+  promptTemplates,
   type Organization,
   type InsertOrganization,
   type User,
@@ -30,6 +31,8 @@ import {
   type RouterConfigHistoryEntry,
   type UserProgress,
   type InsertUserProgress,
+  type PromptTemplate,
+  type InsertPromptTemplate,
 } from "@shared/schema";
 
 // ============================================================================
@@ -105,6 +108,13 @@ export interface IStorage {
     "totalMessages" | "averagePromptQuality" | "promptQualityHistory" |
     "completedLessons" | "securityFlags" | "modelUsageStats" | "lastActiveAt"
   >>): Promise<UserProgress | undefined>;
+
+  // Prompt Templates
+  getPromptTemplate(id: string): Promise<PromptTemplate | undefined>;
+  listPromptTemplates(filters?: { category?: string; search?: string; isPreset?: boolean }, limit?: number): Promise<PromptTemplate[]>;
+  getPopularPromptTemplates(limit?: number): Promise<PromptTemplate[]>;
+  createPromptTemplate(template: InsertPromptTemplate): Promise<PromptTemplate>;
+  incrementTemplateUsage(id: string): Promise<PromptTemplate | undefined>;
 
   // Analytics (aggregated queries for admin)
   getAnalyticsOverview(orgId: string): Promise<{
@@ -515,6 +525,65 @@ export class DatabaseStorage implements IStorage {
       .update(userProgress)
       .set(data)
       .where(eq(userProgress.userId, userId))
+      .returning();
+    return updated;
+  }
+
+  // --- Prompt Templates ---
+
+  async getPromptTemplate(id: string): Promise<PromptTemplate | undefined> {
+    const [template] = await this.db.select().from(promptTemplates).where(eq(promptTemplates.id, id));
+    return template;
+  }
+
+  async listPromptTemplates(
+    filters?: { category?: string; search?: string; isPreset?: boolean },
+    limit: number = 50
+  ): Promise<PromptTemplate[]> {
+    const conditions = [eq(promptTemplates.isGlobal, true)];
+
+    if (filters?.category) {
+      conditions.push(eq(promptTemplates.category, filters.category));
+    }
+    if (filters?.isPreset !== undefined) {
+      conditions.push(eq(promptTemplates.isPreset, filters.isPreset));
+    }
+    if (filters?.search) {
+      conditions.push(
+        sql`(${promptTemplates.title} ILIKE ${'%' + filters.search + '%'} OR ${promptTemplates.description} ILIKE ${'%' + filters.search + '%'})`
+      );
+    }
+
+    return this.db
+      .select()
+      .from(promptTemplates)
+      .where(and(...conditions))
+      .orderBy(desc(promptTemplates.usageCount))
+      .limit(limit);
+  }
+
+  async getPopularPromptTemplates(limit: number = 10): Promise<PromptTemplate[]> {
+    return this.db
+      .select()
+      .from(promptTemplates)
+      .where(eq(promptTemplates.isGlobal, true))
+      .orderBy(desc(promptTemplates.usageCount))
+      .limit(limit);
+  }
+
+  async createPromptTemplate(template: InsertPromptTemplate): Promise<PromptTemplate> {
+    const [created] = await this.db.insert(promptTemplates).values(template as any).returning();
+    return created;
+  }
+
+  async incrementTemplateUsage(id: string): Promise<PromptTemplate | undefined> {
+    const [updated] = await this.db
+      .update(promptTemplates)
+      .set({
+        usageCount: sql`${promptTemplates.usageCount} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(promptTemplates.id, id))
       .returning();
     return updated;
   }

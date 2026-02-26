@@ -14,6 +14,11 @@ import type { Provider, ParameterTuning, APIKeys, ConversationMessage } from '..
 
 /**
  * Generate AI response using the appropriate provider (non-streaming)
+ *
+ * @param systemPrompt - Optional system-level instruction injected per-provider:
+ *   - OpenAI: `{ role: 'system' }` message at start
+ *   - Anthropic: `system:` parameter in messages.create()
+ *   - Gemini: `systemInstruction` in config
  */
 export async function generateResponse(
   optimizedPrompt: string,
@@ -21,15 +26,16 @@ export async function generateResponse(
   provider: Provider,
   model: string,
   parameters: ParameterTuning,
-  apiKeys: APIKeys
+  apiKeys: APIKeys,
+  systemPrompt?: string
 ): Promise<string> {
   switch (provider) {
     case 'gemini':
-      return generateGeminiResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.gemini!);
+      return generateGeminiResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.gemini!, systemPrompt);
     case 'openai':
-      return generateOpenAIResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.openai!);
+      return generateOpenAIResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.openai!, systemPrompt);
     case 'anthropic':
-      return generateAnthropicResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.anthropic!);
+      return generateAnthropicResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.anthropic!, systemPrompt);
     default:
       throw new Error(`Unsupported provider: ${provider}`);
   }
@@ -39,6 +45,8 @@ export async function generateResponse(
  * Stream AI response tokens via a callback.
  * Returns the full accumulated response.
  * Supports cancellation via AbortController signal.
+ *
+ * @param systemPrompt - Optional system-level instruction injected per-provider
  */
 export async function generateResponseStream(
   optimizedPrompt: string,
@@ -48,15 +56,16 @@ export async function generateResponseStream(
   parameters: ParameterTuning,
   apiKeys: APIKeys,
   onToken: (token: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  systemPrompt?: string
 ): Promise<string> {
   switch (provider) {
     case 'gemini':
-      return streamGeminiResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.gemini!, onToken, signal);
+      return streamGeminiResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.gemini!, onToken, signal, systemPrompt);
     case 'openai':
-      return streamOpenAIResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.openai!, onToken, signal);
+      return streamOpenAIResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.openai!, onToken, signal, systemPrompt);
     case 'anthropic':
-      return streamAnthropicResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.anthropic!, onToken, signal);
+      return streamAnthropicResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.anthropic!, onToken, signal, systemPrompt);
     default:
       throw new Error(`Unsupported provider: ${provider}`);
   }
@@ -71,7 +80,8 @@ async function generateGeminiResponse(
   conversationHistory: ConversationMessage[],
   model: string,
   parameters: ParameterTuning,
-  apiKey: string
+  apiKey: string,
+  systemPrompt?: string
 ): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
 
@@ -90,7 +100,8 @@ async function generateGeminiResponse(
     config: {
       temperature: parameters.temperature,
       topP: parameters.top_p,
-      maxOutputTokens: parameters.max_tokens
+      maxOutputTokens: parameters.max_tokens,
+      ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
     }
   });
 
@@ -106,11 +117,13 @@ async function generateOpenAIResponse(
   conversationHistory: ConversationMessage[],
   model: string,
   parameters: ParameterTuning,
-  apiKey: string
+  apiKey: string,
+  systemPrompt?: string
 ): Promise<string> {
   const openai = new OpenAI({ apiKey });
 
   const messages: Array<{role: 'user' | 'assistant' | 'system', content: string}> = [
+    ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
     ...conversationHistory.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
     { role: 'user' as const, content: prompt }
   ];
@@ -131,7 +144,8 @@ async function generateAnthropicResponse(
   conversationHistory: ConversationMessage[],
   model: string,
   parameters: ParameterTuning,
-  apiKey: string
+  apiKey: string,
+  systemPrompt?: string
 ): Promise<string> {
   const anthropic = new Anthropic({ apiKey });
 
@@ -144,7 +158,8 @@ async function generateAnthropicResponse(
     model: model,
     max_tokens: parameters.max_tokens,
     temperature: parameters.temperature,
-    messages
+    messages,
+    ...(systemPrompt ? { system: systemPrompt } : {}),
   });
 
   const textContent = response.content.find(block => block.type === 'text');
@@ -164,7 +179,8 @@ async function streamGeminiResponse(
   parameters: ParameterTuning,
   apiKey: string,
   onToken: (token: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  systemPrompt?: string
 ): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
 
@@ -184,6 +200,7 @@ async function streamGeminiResponse(
       temperature: parameters.temperature,
       topP: parameters.top_p,
       maxOutputTokens: parameters.max_tokens,
+      ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
     },
   });
 
@@ -207,11 +224,13 @@ async function streamOpenAIResponse(
   parameters: ParameterTuning,
   apiKey: string,
   onToken: (token: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  systemPrompt?: string
 ): Promise<string> {
   const openai = new OpenAI({ apiKey });
 
   const messages: Array<{role: 'user' | 'assistant' | 'system', content: string}> = [
+    ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
     ...conversationHistory.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
     { role: 'user' as const, content: prompt }
   ];
@@ -248,7 +267,8 @@ async function streamAnthropicResponse(
   parameters: ParameterTuning,
   apiKey: string,
   onToken: (token: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  systemPrompt?: string
 ): Promise<string> {
   const anthropic = new Anthropic({ apiKey });
 
@@ -262,6 +282,7 @@ async function streamAnthropicResponse(
     max_tokens: parameters.max_tokens,
     temperature: parameters.temperature,
     messages,
+    ...(systemPrompt ? { system: systemPrompt } : {}),
   });
 
   let fullText = "";
