@@ -14,7 +14,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import {
   MODEL_CATALOG,
-  selectCheapestModel,
+  selectModelsByCost,
   type ModelOption,
   type AvailableProviders,
 } from "../shared/model-selection";
@@ -472,7 +472,11 @@ Important:
 - Return ONLY JSON, no markdown code fences or explanation`;
 }
 
-async function callNLEdit(
+/**
+ * Call a single provider for NL editing/generation.
+ * Throws on any error (auth, rate limit, network, etc.)
+ */
+async function callNLEditSingle(
   prompt: string,
   model: ModelOption,
   apiKey: string
@@ -506,6 +510,42 @@ async function callNLEdit(
   }
 
   throw new Error(`Unsupported provider: ${model.provider}`);
+}
+
+/**
+ * Try NL edit across available providers in cost order.
+ * Falls back to next provider on auth/permission errors (401/403).
+ */
+async function callNLEditWithFallback(
+  prompt: string,
+  models: ModelOption[],
+  apiKeys: APIKeys
+): Promise<string> {
+  const errors: string[] = [];
+
+  for (const model of models) {
+    const apiKey = apiKeys[model.provider] || "";
+    try {
+      return await callNLEditSingle(prompt, model, apiKey);
+    } catch (err: any) {
+      const status = err?.status || err?.statusCode || err?.response?.status;
+      const msg = err?.message || String(err);
+      const isAuthError = status === 401 || status === 403
+        || msg.includes("insufficient permissions")
+        || msg.includes("Missing scopes")
+        || msg.includes("invalid.*api.*key");
+
+      if (isAuthError && models.length > 1) {
+        console.warn(`[NL Edit] ${model.provider} auth failed (${status}), trying next provider`);
+        errors.push(`${model.provider}: ${msg}`);
+        continue;
+      }
+      // Non-auth error or last provider — rethrow
+      throw err;
+    }
+  }
+
+  throw new Error(`All providers failed: ${errors.join("; ")}`);
 }
 
 export interface NLEditResult {
@@ -565,15 +605,14 @@ export async function editConfigWithNaturalLanguage(
     anthropic: !!apiKeys.anthropic,
   };
 
-  const model = selectCheapestModel(providers);
-  if (!model) {
+  const models = selectModelsByCost(providers);
+  if (models.length === 0) {
     throw new Error("No API keys available for natural language editing");
   }
 
-  const apiKey = apiKeys[model.provider] || "";
   const prompt = buildNLEditPrompt(instruction, currentRules, currentCatchAll);
 
-  const rawResponse = await callNLEdit(prompt, model, apiKey);
+  const rawResponse = await callNLEditWithFallback(prompt, models, apiKeys);
 
   // Extract JSON (handle markdown code fences)
   let jsonStr = rawResponse;
@@ -700,15 +739,14 @@ export async function generateRuleFromNaturalLanguage(
     anthropic: !!apiKeys.anthropic,
   };
 
-  const model = selectCheapestModel(providers);
-  if (!model) {
+  const models = selectModelsByCost(providers);
+  if (models.length === 0) {
     throw new Error("No API keys available for rule generation");
   }
 
-  const apiKey = apiKeys[model.provider] || "";
   const prompt = buildNLRulePrompt(description, existingRules);
 
-  const rawResponse = await callNLEdit(prompt, model, apiKey);
+  const rawResponse = await callNLEditWithFallback(prompt, models, apiKeys);
 
   // Extract JSON (handle markdown code fences)
   let jsonStr = rawResponse;

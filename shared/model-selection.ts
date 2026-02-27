@@ -456,13 +456,18 @@ export function getProviderStatus(availableProviders: AvailableProviders): strin
  * Select the cheapest available model for lightweight analysis tasks
  */
 export function selectCheapestModel(providers: AvailableProviders): ModelOption | null {
+  const sorted = selectModelsByCost(providers);
+  return sorted.length > 0 ? sorted[0] : null;
+}
+
+/**
+ * Returns all available models sorted by cost (cheapest first).
+ * Useful for fallback logic — try cheapest, then next, etc.
+ */
+export function selectModelsByCost(providers: AvailableProviders): ModelOption[] {
   const catalog = buildCatalog();
   const pricing = buildPricing();
   const available = catalog.filter((m) => providers[m.provider]);
-
-  if (available.length === 0) {
-    return null;
-  }
 
   available.sort((a, b) => {
     const priceA = pricing[a.model]?.input || Infinity;
@@ -470,7 +475,7 @@ export function selectCheapestModel(providers: AvailableProviders): ModelOption 
     return priceA - priceB;
   });
 
-  return available[0];
+  return available;
 }
 
 /**
