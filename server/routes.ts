@@ -657,7 +657,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!instruction || !currentRules || !currentCatchAll) {
         return res.status(400).json({ error: "instruction, currentRules, and currentCatchAll are required" });
       }
-      if (!apiKeys || (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic)) {
+
+      // Resolve API keys: user keys → demo keys
+      let resolvedKeys = apiKeys;
+      const hasUserKeys = resolvedKeys && (resolvedKeys.gemini || resolvedKeys.openai || resolvedKeys.anthropic);
+      if (!hasUserKeys && isDemoMode() && hasAnyDemoKey()) {
+        resolvedKeys = getDemoKeys();
+      }
+      if (!resolvedKeys || (!resolvedKeys.gemini && !resolvedKeys.openai && !resolvedKeys.anthropic)) {
         return res.status(400).json({ error: "At least one API key is required for natural language editing" });
       }
 
@@ -665,7 +672,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         instruction,
         currentRules,
         currentCatchAll,
-        apiKeys
+        resolvedKeys
       );
 
       res.json(result);

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
+// ScrollArea replaced with overflow-y-auto div for reliable scrolling
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,7 +18,6 @@ import { useAuth } from "@/hooks/use-auth";
 import {
   Plus,
   Trash2,
-  GripVertical,
   Save,
   RotateCcw,
   ChevronDown,
@@ -33,20 +32,17 @@ import {
   Diff,
 } from "lucide-react";
 import type { RouterRule } from "@shared/types";
+import { getModelFamilies } from "@shared/model-aliases";
 
 const TASK_TYPES = ["coding", "math", "creative", "conversation", "analysis", "general"];
 const COMPLEXITY_LEVELS = ["simple", "moderate", "complex"];
-const MODEL_OPTIONS = [
-  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite", provider: "gemini" },
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "gemini" },
-  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "gemini" },
-  { id: "gpt-5-nano", name: "GPT-5 Nano", provider: "openai" },
-  { id: "gpt-5-mini", name: "GPT-5 Mini", provider: "openai" },
-  { id: "gpt-5", name: "GPT-5", provider: "openai" },
-  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", provider: "anthropic" },
-  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic" },
-  { id: "claude-opus-4-1", name: "Claude Opus 4.1", provider: "anthropic" },
-];
+
+/** Build the model option list from the shared model-aliases registry. */
+const MODEL_OPTIONS = getModelFamilies().map(f => ({
+  id: f.alias,
+  name: f.displayName,
+  provider: f.provider,
+}));
 
 function getProviderColor(provider: string) {
   switch (provider) {
@@ -464,89 +460,83 @@ function RuleCard({
     });
   };
 
+  const hasConditions = (rule.conditions.taskTypes?.length ?? 0) > 0
+    || (rule.conditions.complexity?.length ?? 0) > 0;
+
   return (
     <Card className={`transition-opacity ${!rule.enabled ? "opacity-50" : ""}`}>
       <div className="p-4">
+        {/* --- Collapsed summary row --- */}
         <div className="flex items-center gap-3">
+          {/* Reorder arrows */}
           {!readOnly && (
-            <div className="flex flex-col gap-0.5">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5"
-                disabled={index === 0}
-                onClick={() => onMove("up")}
-              >
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <Button variant="ghost" size="icon" className="h-5 w-5" disabled={index === 0} onClick={() => onMove("up")}>
                 <ChevronUp className="h-3 w-3" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5"
-                disabled={index === totalRules - 1}
-                onClick={() => onMove("down")}
-              >
+              <Button variant="ghost" size="icon" className="h-5 w-5" disabled={index === totalRules - 1} onClick={() => onMove("down")}>
                 <ChevronDown className="h-3 w-3" />
               </Button>
             </div>
           )}
 
-          {!readOnly && <GripVertical className="h-4 w-4 text-muted-foreground" />}
-
+          {/* Left: name + conditions */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mb-1">
               {readOnly ? (
                 <span className="text-sm font-medium">{rule.name}</span>
               ) : (
                 <Input
                   value={rule.name}
                   onChange={e => onUpdate({ ...rule, name: e.target.value })}
-                  className="h-7 text-sm font-medium max-w-[200px]"
+                  className="h-7 text-sm font-medium max-w-[180px]"
                 />
               )}
+            </div>
+            {hasConditions && (
               <div className="flex gap-1 flex-wrap">
                 {(rule.conditions.taskTypes || []).map(t => (
-                  <Badge key={t} variant="outline" className="text-xs">{t}</Badge>
+                  <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
                 ))}
                 {(rule.conditions.complexity || []).map(c => (
-                  <Badge key={c} variant="secondary" className="text-xs">{c}</Badge>
+                  <Badge key={c} variant="secondary" className="text-[10px]">{c}</Badge>
                 ))}
               </div>
-            </div>
-            <div className="flex gap-1 mt-1 flex-wrap">
-              {rule.modelPriority.slice(0, 3).map(m => {
-                const model = MODEL_OPTIONS.find(o => o.id === m);
-                return (
-                  <Badge key={m} className={`text-xs ${getProviderColor(model?.provider || "")}`}>
-                    {model?.name || m}
-                  </Badge>
-                );
-              })}
-              {rule.modelPriority.length > 3 && (
-                <Badge variant="outline" className="text-xs">
-                  +{rule.modelPriority.length - 3} more
-                </Badge>
-              )}
-            </div>
+            )}
+            {!hasConditions && (
+              <span className="text-[10px] text-muted-foreground italic">No conditions (matches all)</span>
+            )}
           </div>
 
+          {/* Center: arrow separator */}
+          <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+
+          {/* Right: model badges */}
+          <div className="flex gap-1 flex-wrap shrink-0 max-w-[240px] justify-end">
+            {rule.modelPriority.slice(0, 3).map(m => {
+              const model = MODEL_OPTIONS.find(o => o.id === m);
+              return (
+                <Badge key={m} className={`text-[10px] ${getProviderColor(model?.provider || "")}`}>
+                  {model?.name || m}
+                </Badge>
+              );
+            })}
+            {rule.modelPriority.length > 3 && (
+              <Badge variant="outline" className="text-[10px]">+{rule.modelPriority.length - 3}</Badge>
+            )}
+          </div>
+
+          {/* Actions */}
           {!readOnly && (
-            <>
-              <Switch
-                checked={rule.enabled}
-                onCheckedChange={enabled => onUpdate({ ...rule, enabled })}
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setExpanded(!expanded)}
-              >
+            <div className="flex items-center gap-1 shrink-0 ml-2">
+              <Switch checked={rule.enabled} onCheckedChange={enabled => onUpdate({ ...rule, enabled })} />
+              <Button variant="ghost" size="sm" onClick={() => setExpanded(!expanded)}>
                 {expanded ? "Collapse" : "Edit"}
               </Button>
               <Button variant="ghost" size="icon" onClick={onDelete}>
                 <Trash2 className="h-4 w-4 text-destructive" />
               </Button>
-            </>
+            </div>
           )}
           {readOnly && (
             <Badge variant={rule.enabled ? "default" : "outline"} className="text-xs">
@@ -555,144 +545,128 @@ function RuleCard({
           )}
         </div>
 
+        {/* --- Expanded edit panel --- */}
         {expanded && (
-          <div className="mt-4 space-y-4 pl-12">
-            <Separator />
+          <div className="mt-4 pt-4 border-t">
+            <div className="grid grid-cols-2 gap-6">
+              {/* Left column: Conditions */}
+              <div className="space-y-4">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Conditions</Label>
 
-            {/* Task Types */}
-            <div>
-              <Label className="text-xs">Task Types</Label>
-              <div className="flex gap-2 mt-1 flex-wrap">
-                {TASK_TYPES.map(t => (
-                  <Badge
-                    key={t}
-                    variant={(rule.conditions.taskTypes || []).includes(t) ? "default" : "outline"}
-                    className="cursor-pointer"
-                    onClick={() => toggleTaskType(t)}
-                  >
-                    {t}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
-            {/* Complexity */}
-            <div>
-              <Label className="text-xs">Complexity</Label>
-              <div className="flex gap-2 mt-1">
-                {COMPLEXITY_LEVELS.map(c => (
-                  <Badge
-                    key={c}
-                    variant={(rule.conditions.complexity || []).includes(c) ? "default" : "outline"}
-                    className="cursor-pointer"
-                    onClick={() => toggleComplexity(c)}
-                  >
-                    {c}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
-            {/* Security Score Max */}
-            <div className="flex gap-4">
-              <div>
-                <Label className="text-xs">Max Security Score</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={10}
-                  value={rule.conditions.securityScoreMax ?? ""}
-                  placeholder="Any"
-                  onChange={e => onUpdate({
-                    ...rule,
-                    conditions: {
-                      ...rule.conditions,
-                      securityScoreMax: e.target.value ? parseInt(e.target.value) : undefined,
-                    },
-                  })}
-                  className="h-8 w-24 mt-1"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Custom Regex</Label>
-                <Input
-                  value={rule.conditions.customRegex || ""}
-                  placeholder="e.g. \\bapi\\b"
-                  onChange={e => onUpdate({
-                    ...rule,
-                    conditions: { ...rule.conditions, customRegex: e.target.value || undefined },
-                  })}
-                  className="h-8 w-48 mt-1"
-                />
-              </div>
-            </div>
-
-            {/* Reasoning */}
-            <div>
-              <Label className="text-xs">Reasoning</Label>
-              <Input
-                value={rule.reasoning}
-                onChange={e => onUpdate({ ...rule, reasoning: e.target.value })}
-                className="h-8 mt-1"
-                placeholder="Why this model for these conditions..."
-              />
-            </div>
-
-            {/* Model Priority */}
-            <div>
-              <Label className="text-xs">Model Priority (first available wins)</Label>
-              <div className="space-y-1 mt-1">
-                {rule.modelPriority.map((modelId, mi) => {
-                  const model = MODEL_OPTIONS.find(o => o.id === modelId);
-                  return (
-                    <div key={modelId} className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground w-4">{mi + 1}.</span>
-                      <Badge className={`text-xs ${getProviderColor(model?.provider || "")}`}>
-                        {model?.name || modelId}
+                <div>
+                  <Label className="text-xs">Task Types</Label>
+                  <div className="flex gap-2 mt-1 flex-wrap">
+                    {TASK_TYPES.map(t => (
+                      <Badge
+                        key={t}
+                        variant={(rule.conditions.taskTypes || []).includes(t) ? "default" : "outline"}
+                        className="cursor-pointer"
+                        onClick={() => toggleTaskType(t)}
+                      >
+                        {t}
                       </Badge>
-                      <div className="flex gap-0.5 ml-auto">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5"
-                          disabled={mi === 0}
-                          onClick={() => moveModel(mi, "up")}
-                        >
-                          <ChevronUp className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5"
-                          disabled={mi === rule.modelPriority.length - 1}
-                          onClick={() => moveModel(mi, "down")}
-                        >
-                          <ChevronDown className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5"
-                          onClick={() => removeModel(modelId)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs">Complexity</Label>
+                  <div className="flex gap-2 mt-1">
+                    {COMPLEXITY_LEVELS.map(c => (
+                      <Badge
+                        key={c}
+                        variant={(rule.conditions.complexity || []).includes(c) ? "default" : "outline"}
+                        className="cursor-pointer"
+                        onClick={() => toggleComplexity(c)}
+                      >
+                        {c}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-4">
+                  <div>
+                    <Label className="text-xs">Max Security Score</Label>
+                    <Input
+                      type="number" min={0} max={10}
+                      value={rule.conditions.securityScoreMax ?? ""}
+                      placeholder="Any"
+                      onChange={e => onUpdate({
+                        ...rule,
+                        conditions: {
+                          ...rule.conditions,
+                          securityScoreMax: e.target.value ? parseInt(e.target.value) : undefined,
+                        },
+                      })}
+                      className="h-8 w-24 mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Custom Regex</Label>
+                    <Input
+                      value={rule.conditions.customRegex || ""}
+                      placeholder="e.g. \\bapi\\b"
+                      onChange={e => onUpdate({
+                        ...rule,
+                        conditions: { ...rule.conditions, customRegex: e.target.value || undefined },
+                      })}
+                      className="h-8 w-48 mt-1"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs">Reasoning</Label>
+                  <Input
+                    value={rule.reasoning}
+                    onChange={e => onUpdate({ ...rule, reasoning: e.target.value })}
+                    className="h-8 mt-1"
+                    placeholder="Why this model for these conditions..."
+                  />
+                </div>
               </div>
-              {/* Add model */}
-              <Select onValueChange={addModel}>
-                <SelectTrigger className="h-8 w-48 mt-2">
-                  <SelectValue placeholder="Add model..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {MODEL_OPTIONS.filter(m => !rule.modelPriority.includes(m.id)).map(m => (
-                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+
+              {/* Right column: Model Priority */}
+              <div className="space-y-3">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Model Priority <span className="normal-case font-normal">(first available wins)</span>
+                </Label>
+                <div className="space-y-1">
+                  {rule.modelPriority.map((modelId, mi) => {
+                    const model = MODEL_OPTIONS.find(o => o.id === modelId);
+                    return (
+                      <div key={modelId} className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground w-4">{mi + 1}.</span>
+                        <Badge className={`text-xs ${getProviderColor(model?.provider || "")}`}>
+                          {model?.name || modelId}
+                        </Badge>
+                        <div className="flex gap-0.5 ml-auto">
+                          <Button variant="ghost" size="icon" className="h-5 w-5" disabled={mi === 0} onClick={() => moveModel(mi, "up")}>
+                            <ChevronUp className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-5 w-5" disabled={mi === rule.modelPriority.length - 1} onClick={() => moveModel(mi, "down")}>
+                            <ChevronDown className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => removeModel(modelId)}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Select onValueChange={addModel}>
+                  <SelectTrigger className="h-8 w-48">
+                    <SelectValue placeholder="Add model..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODEL_OPTIONS.filter(m => !rule.modelPriority.includes(m.id)).map(m => (
+                      <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         )}
@@ -784,7 +758,7 @@ export default function Router() {
   // NL edit mutation
   const nlEditMutation = useMutation({
     mutationFn: async (instruction: string) => {
-      // Get API keys from localStorage (same source as the chat)
+      // Pass user API keys if available; the server falls back to demo keys
       const storedKeys = localStorage.getItem("aihelm_api_keys");
       const apiKeys = storedKeys ? JSON.parse(storedKeys) : {};
 
@@ -795,7 +769,7 @@ export default function Router() {
           instruction,
           currentRules: rules,
           currentCatchAll: catchAll,
-          apiKeys,
+          ...(apiKeys.gemini || apiKeys.openai || apiKeys.anthropic ? { apiKeys } : {}),
         }),
       });
       if (!res.ok) {
@@ -862,7 +836,7 @@ export default function Router() {
       name: "New Rule",
       enabled: true,
       conditions: {},
-      modelPriority: ["gemini-2.5-flash"],
+      modelPriority: ["gemini-flash"],
       reasoning: "",
     };
     setRules([...rules, newRule]);
@@ -965,22 +939,20 @@ export default function Router() {
               </Card>
             ) : (
               <>
-                <ScrollArea className="max-h-[60vh]">
-                  <div className="space-y-3">
-                    {rules.map((rule, i) => (
-                      <RuleCard
-                        key={rule.id}
-                        rule={rule}
-                        index={i}
-                        totalRules={rules.length}
-                        onUpdate={updated => updateRule(i, updated)}
-                        onDelete={() => deleteRule(i)}
-                        onMove={dir => moveRule(i, dir)}
-                        readOnly={!canEdit}
-                      />
-                    ))}
-                  </div>
-                </ScrollArea>
+                <div className="overflow-y-auto max-h-[65vh] space-y-3 pr-1">
+                  {rules.map((rule, i) => (
+                    <RuleCard
+                      key={rule.id}
+                      rule={rule}
+                      index={i}
+                      totalRules={rules.length}
+                      onUpdate={updated => updateRule(i, updated)}
+                      onDelete={() => deleteRule(i)}
+                      onMove={dir => moveRule(i, dir)}
+                      readOnly={!canEdit}
+                    />
+                  ))}
+                </div>
 
                 {canEdit && (
                   <Button variant="outline" onClick={addRule} className="w-full">
