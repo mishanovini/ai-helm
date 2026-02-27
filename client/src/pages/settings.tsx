@@ -368,7 +368,8 @@ export default function Settings() {
         <div className="flex gap-2">
           <Input
             id={`${provider}-key`}
-            type={isFresh && isShowing ? "text" : "password"}
+            type="text"
+            className={isFresh && isShowing ? "" : "input-masked"}
             value={displayValue}
             onChange={(e) => handleKeyChange(provider, e.target.value)}
             onBlur={() => handleKeyBlur(provider)}

@@ -598,7 +598,8 @@ function DemoKeysTab() {
               <Label htmlFor="demo-gemini" className="text-xs">Google Gemini</Label>
               <Input
                 id="demo-gemini"
-                type="password"
+                type="text"
+                className="input-masked"
                 placeholder="AIza..."
                 value={geminiKey}
                 onChange={(e) => { setGeminiKey(e.target.value); setValidationErrors(prev => { const n = {...prev}; delete n.gemini; return n; }); }}
@@ -614,7 +615,8 @@ function DemoKeysTab() {
               <Label htmlFor="demo-openai" className="text-xs">OpenAI</Label>
               <Input
                 id="demo-openai"
-                type="password"
+                type="text"
+                className="input-masked"
                 placeholder="sk-proj-..."
                 value={openaiKey}
                 onChange={(e) => { setOpenaiKey(e.target.value); setValidationErrors(prev => { const n = {...prev}; delete n.openai; return n; }); }}
@@ -630,7 +632,8 @@ function DemoKeysTab() {
               <Label htmlFor="demo-anthropic" className="text-xs">Anthropic</Label>
               <Input
                 id="demo-anthropic"
-                type="password"
+                type="text"
+                className="input-masked"
                 placeholder="sk-ant-..."
                 value={anthropicKey}
                 onChange={(e) => { setAnthropicKey(e.target.value); setValidationErrors(prev => { const n = {...prev}; delete n.anthropic; return n; }); }}
@@ -1160,7 +1163,8 @@ function ApiKeysTab({ apiKeys }: { apiKeys: any[] | undefined }) {
               <Label htmlFor="add-key-value" className="text-xs">API Key</Label>
               <Input
                 id="add-key-value"
-                type="password"
+                type="text"
+                className="input-masked"
                 placeholder={newProvider === "gemini" ? "AIza..." : newProvider === "openai" ? "sk-proj-..." : "sk-ant-..."}
                 value={newKey}
                 onChange={(e) => { setNewKey(e.target.value); setAddError(""); }}

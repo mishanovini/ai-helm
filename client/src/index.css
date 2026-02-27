@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Mask text input like a password field without using type="password",
+   so Chrome's password manager won't autofill these fields. */
+.input-masked {
+  -webkit-text-security: disc;
+}
+
 /* LIGHT MODE */
 :root {
   --button-outline: rgba(0,0,0, .10);
