@@ -61,7 +61,7 @@ const PROVIDER_CONFIG = {
   anthropic: {
     statusPageUrl: "https://status.claude.com",
     componentsUrl: "https://status.claude.com/api/v2/summary.json",
-    componentName: "Claude API",
+    componentName: "Claude API (api.anthropic.com)",
   },
   gemini: {
     statusPageUrl: "https://status.cloud.google.com",
@@ -160,8 +160,13 @@ async function fetchAtlassianStatus(
     }
 
     const data = await response.json();
+    // Match by exact name first, then fall back to prefix match.
+    // Providers sometimes append qualifiers (e.g., "Claude API" → "Claude API (api.anthropic.com)")
+    const baseName = config.componentName.split(" (")[0];
     const component = data.components?.find(
       (c: any) => c.name === config.componentName
+    ) || data.components?.find(
+      (c: any) => c.name.startsWith(baseName)
     );
 
     const level = component

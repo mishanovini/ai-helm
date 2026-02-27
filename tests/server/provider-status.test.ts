@@ -332,6 +332,23 @@ describe("Provider Status — Error Handling", () => {
     expect(result.providers.gemini.status).toBe("unknown");
   });
 
+  it("should match renamed Anthropic component via prefix fallback", async () => {
+    // Anthropic renamed "Claude API" to "Claude API (api.anthropic.com)"
+    // The prefix fallback should handle both the old and new names
+    mockFetch
+      .mockResolvedValueOnce(
+        mockJsonResponse(makeAtlassianSummary("Chat Completions", "operational"))
+      )
+      .mockResolvedValueOnce(
+        mockJsonResponse(makeAtlassianSummary("Claude API (api.anthropic.com)", "operational"))
+      )
+      .mockResolvedValueOnce(mockJsonResponse([]));
+
+    const result = await getAllProviderStatuses();
+    expect(result.providers.anthropic.status).toBe("operational");
+    expect(result.providers.anthropic.description).toContain("fully operational");
+  });
+
   it("should handle missing component gracefully", async () => {
     // Response doesn't contain the expected component name
     const noMatchData = {
