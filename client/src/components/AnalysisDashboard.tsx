@@ -293,7 +293,9 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
           {/* ============================================================= */}
           {/* 4. SECURITY — compact always-visible indicator                 */}
           {/* ============================================================= */}
-          {!data.securityHalted && (
+          {!data.securityHalted && (() => {
+            const isUnavailable = data.securityExplanation?.toLowerCase().includes("unavailable");
+            return (
             <Collapsible
               open={securityExpanded || !!shouldExpandSecurity}
               onOpenChange={setSecurityExpanded}
@@ -303,7 +305,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                   <div className="flex items-center gap-2">
                     <Shield className="h-3.5 w-3.5 text-muted-foreground" />
                     <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Security</span>
-                    {data.securityScore !== undefined && (
+                    {data.securityScore !== undefined && !isUnavailable && (
                       <div className="flex items-center gap-1.5">
                         <span className={cn("h-2 w-2 rounded-full", getSecurityDotColor(data.securityScore))} />
                         <span className={cn("text-xs font-semibold", getSecurityColor(data.securityScore))} data-testid="text-security-score">
@@ -313,6 +315,9 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                           {data.securityScore <= 3 ? "Low risk" : data.securityScore <= 6 ? "Medium" : "High risk"}
                         </span>
                       </div>
+                    )}
+                    {isUnavailable && (
+                      <span className="text-[10px] text-muted-foreground italic">Unavailable</span>
                     )}
                   </div>
                   <ChevronDown className={cn(
@@ -327,7 +332,8 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 </div>
               </CollapsibleContent>
             </Collapsible>
-          )}
+            );
+          })()}
 
           {/* ============================================================= */}
           {/* 5. PARAMETERS — collapsed with value preview                   */}

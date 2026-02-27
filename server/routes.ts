@@ -1393,13 +1393,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (controller) {
             controller.abort();
             activeJobs.delete(targetJobId);
-            ws.send(JSON.stringify({
-              jobId: targetJobId,
-              phase: "cancelled",
-              status: "completed",
-              payload: { message: "Generation cancelled by user" }
-            }));
           }
+          // Always acknowledge cancellation so the client can unlock the UI,
+          // even if the server-side job already finished and was cleaned up.
+          ws.send(JSON.stringify({
+            jobId: targetJobId,
+            phase: "cancelled",
+            status: "completed",
+            payload: { message: "Generation cancelled by user" }
+          }));
           return;
         }
 

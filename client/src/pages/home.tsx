@@ -167,9 +167,14 @@ export default function Home() {
       setAnalysisData(prev => ({ ...prev, style: payload.style } as AnalysisData));
     } else if (phase === "security" && status === "completed") {
       setLogs(prev => prev.filter(log => log.message !== "Assessing security risk..."));
-      addLog(`Security score: ${payload.securityScore}/10`, "success");
-      if (payload.securityExplanation) {
+      const isUnavailable = payload.securityExplanation?.toLowerCase().includes("unavailable");
+      if (isUnavailable) {
         addLog(`Risk: ${payload.securityExplanation}`, "info");
+      } else {
+        addLog(`Security score: ${payload.securityScore}/10`, "success");
+        if (payload.securityExplanation) {
+          addLog(`Risk: ${payload.securityExplanation}`, "info");
+        }
       }
       setAnalysisData(prev => ({
         ...prev,
@@ -266,6 +271,8 @@ export default function Home() {
           : m
       ));
       streamingMessageRef.current = "";
+      // Safety net: ensure generation flag is cleared when final response arrives
+      setIsGenerating(false);
     } else if (phase === "provider_error" && status === "processing") {
       // Provider failed — rerouting to an alternative
       const providerLabel =
@@ -326,7 +333,8 @@ export default function Home() {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     } else if (status === "error") {
       addLog(`Error in ${phase}: ${error || "Unknown error"}`, "error");
-      if (phase === "complete") {
+      // Clear generation/processing flags for any terminal error phase
+      if (phase === "complete" || phase === "generating" || phase === "response") {
         setIsProcessing(false);
         setIsGenerating(false);
         setActiveJobId(null);

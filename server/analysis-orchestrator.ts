@@ -401,8 +401,9 @@ export async function runAnalysisJob(
           resolvedSystemPrompt
         );
 
+        const costLabel = results.estimatedCost?.displayText ?? "~$0.001";
         sendUpdate("generating", "completed", {
-          message: `Response generated using ${currentModel.displayName} (${results.estimatedCost.displayText})`
+          message: `Response generated using ${currentModel.displayName} (${costLabel})`
         });
       } catch (generationError: any) {
         // Track this provider failure

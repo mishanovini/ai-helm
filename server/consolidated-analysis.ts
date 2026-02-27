@@ -23,23 +23,24 @@ import {
   analyzeSecurityRisk,
 } from "./universal-analysis";
 
-// Zod schema for validating the consolidated analysis JSON response
+// Zod schema for validating the consolidated analysis JSON response.
+// Uses coercion and defaults to handle imprecise LLM output gracefully.
 const consolidatedSchema = z.object({
-  intent: z.string(),
-  sentiment: z.enum(["positive", "neutral", "negative"]),
-  sentimentDetail: z.string(),
-  style: z.enum(["formal", "casual", "technical", "concise", "verbose", "neutral"]),
-  securityScore: z.number().min(0).max(10),
-  securityExplanation: z.string(),
-  taskType: z.enum(["coding", "math", "creative", "conversation", "analysis", "general"]),
-  complexity: z.enum(["simple", "moderate", "complex"]),
+  intent: z.string().default("general"),
+  sentiment: z.enum(["positive", "neutral", "negative"]).catch("neutral"),
+  sentimentDetail: z.string().default("neutral"),
+  style: z.enum(["formal", "casual", "technical", "concise", "verbose", "neutral"]).catch("neutral"),
+  securityScore: z.coerce.number().min(0).max(10).default(0),
+  securityExplanation: z.string().default("No significant security concerns"),
+  taskType: z.enum(["coding", "math", "creative", "conversation", "analysis", "general"]).catch("general"),
+  complexity: z.enum(["simple", "moderate", "complex"]).catch("simple"),
   promptQuality: z.object({
-    score: z.number().min(0).max(100),
-    clarity: z.number().min(0).max(100),
-    specificity: z.number().min(0).max(100),
-    actionability: z.number().min(0).max(100),
-    suggestions: z.array(z.string()),
-  }),
+    score: z.coerce.number().min(0).max(100).default(50),
+    clarity: z.coerce.number().min(0).max(100).default(50),
+    specificity: z.coerce.number().min(0).max(100).default(50),
+    actionability: z.coerce.number().min(0).max(100).default(50),
+    suggestions: z.array(z.string()).default([]),
+  }).default({}),
 });
 
 // Security keyword patterns (extracted from universal-analysis.ts for pre-check)
@@ -289,16 +290,21 @@ async function runFallbackAnalysis(
     analyzeStyle(message, model, apiKey).catch(() => ({ style: "neutral" })),
   ]);
 
-  // Security depends on intent — use cautious default on failure (floor score or 3, whichever is higher)
+  // Security depends on intent — use regex floor score on LLM failure (no inflated defaults)
   const securityResult = await analyzeSecurityRisk(
     message,
     intentResult.intent,
     model,
     apiKey
-  ).catch(() => ({
-    score: Math.max(securityFloorScore, 3),
-    explanation: "Analysis unavailable — elevated to moderate risk as a precaution",
-  }));
+  ).catch((securityError: any) => {
+    console.warn(`Security analysis LLM call failed: ${securityError.message}`);
+    return {
+      score: securityFloorScore,
+      explanation: securityFloorScore > 0
+        ? `LLM analysis unavailable. Regex pre-check score: ${securityFloorScore}/10.`
+        : "Security analysis unavailable — no known threats detected by pre-check.",
+    };
+  });
 
   // Apply floor score
   const finalSecurityScore = Math.max(securityResult.score, securityFloorScore);
