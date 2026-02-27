@@ -164,11 +164,13 @@ function AdminSecretGate({ onVerified }: { onVerified: () => void }) {
                 <Label htmlFor="admin-secret">Admin Secret</Label>
                 <Input
                   id="admin-secret"
+                  name="admin-secret"
                   type="password"
                   placeholder="Enter admin secret..."
                   value={secret}
                   onChange={(e) => { setSecret(e.target.value); setError(""); }}
                   autoFocus
+                  autoComplete="current-password"
                 />
                 {error && (
                   <p className="text-sm text-destructive flex items-center gap-1">
@@ -600,6 +602,7 @@ function DemoKeysTab() {
                 placeholder="AIza..."
                 value={geminiKey}
                 onChange={(e) => { setGeminiKey(e.target.value); setValidationErrors(prev => { const n = {...prev}; delete n.gemini; return n; }); }}
+                autoComplete="off"
               />
               {validationErrors.gemini && (
                 <p className="text-xs text-destructive flex items-center gap-1">
@@ -615,6 +618,7 @@ function DemoKeysTab() {
                 placeholder="sk-proj-..."
                 value={openaiKey}
                 onChange={(e) => { setOpenaiKey(e.target.value); setValidationErrors(prev => { const n = {...prev}; delete n.openai; return n; }); }}
+                autoComplete="off"
               />
               {validationErrors.openai && (
                 <p className="text-xs text-destructive flex items-center gap-1">
@@ -630,6 +634,7 @@ function DemoKeysTab() {
                 placeholder="sk-ant-..."
                 value={anthropicKey}
                 onChange={(e) => { setAnthropicKey(e.target.value); setValidationErrors(prev => { const n = {...prev}; delete n.anthropic; return n; }); }}
+                autoComplete="off"
               />
               {validationErrors.anthropic && (
                 <p className="text-xs text-destructive flex items-center gap-1">
@@ -1159,6 +1164,7 @@ function ApiKeysTab({ apiKeys }: { apiKeys: any[] | undefined }) {
                 placeholder={newProvider === "gemini" ? "AIza..." : newProvider === "openai" ? "sk-proj-..." : "sk-ant-..."}
                 value={newKey}
                 onChange={(e) => { setNewKey(e.target.value); setAddError(""); }}
+                autoComplete="off"
               />
             </div>
           </div>

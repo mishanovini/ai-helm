@@ -8,7 +8,7 @@ import { storage } from "./storage";
 import { runAnalysisJob } from "./analysis-orchestrator";
 import { validateAPIKey } from "./api-key-validator";
 import { requireAuth, requireAdmin, isAuthRequired, verifyAdminSecret, parseSessionFromUpgrade } from "./auth";
-import { getDefaultRules, seedDefaultConfig, editConfigWithNaturalLanguage } from "./dynamic-router";
+import { getDefaultRules, seedDefaultConfig, editConfigWithNaturalLanguage, generateRuleFromNaturalLanguage } from "./dynamic-router";
 import { encrypt, decrypt, isEncryptionConfigured } from "./encryption";
 import { demoBudget, isDemoMode, getDemoKeys, hasAnyDemoKey, setDemoKeys, getMaskedDemoKeys, DEMO_ORG_ID } from "./demo-budget";
 import { isDatabaseAvailable } from "./db";
@@ -679,6 +679,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("NL edit error:", error);
       res.status(500).json({ error: error.message || "Failed to process natural language edit" });
+    }
+  });
+
+  // Generate a single rule from a natural language description
+  app.post("/api/router/config/generate-rule", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      if (!userId) return res.status(401).json({ error: "Not authenticated" });
+
+      const { description, currentRules, apiKeys } = req.body;
+      if (!description) {
+        return res.status(400).json({ error: "description is required" });
+      }
+
+      // Resolve API keys: user keys → demo keys
+      let resolvedKeys = apiKeys;
+      const hasUserKeys = resolvedKeys && (resolvedKeys.gemini || resolvedKeys.openai || resolvedKeys.anthropic);
+      if (!hasUserKeys && isDemoMode() && hasAnyDemoKey()) {
+        resolvedKeys = getDemoKeys();
+      }
+      if (!resolvedKeys || (!resolvedKeys.gemini && !resolvedKeys.openai && !resolvedKeys.anthropic)) {
+        return res.status(400).json({ error: "At least one API key is required for rule generation" });
+      }
+
+      const result = await generateRuleFromNaturalLanguage(
+        description,
+        currentRules || [],
+        resolvedKeys
+      );
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("NL rule generation error:", error);
+      res.status(500).json({ error: error.message || "Failed to generate rule" });
     }
   });
 

@@ -12,7 +12,7 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 **Authentication & Multi-User** - OAuth login via Google and GitHub, session management, role-based access (user/admin), organization support.
 
-**Dynamic Model Router** - Configurable rule-based routing with version history, natural language editing ("make coding tasks use Claude"), and side-by-side version comparison.
+**Dynamic Model Router** - Configurable rule-based routing with version history, natural language editing ("make coding tasks use Claude"), side-by-side version comparison, and extensible task types. Beyond the 6 built-in types (coding, math, creative, conversation, analysis, general), users can define custom task types (e.g., "customer-support", "legal-research") that are automatically injected into the LLM analysis prompt for classification. New rules can be created via "Describe with AI" — describe what you want in plain English and the LLM generates a complete rule, including novel task types when needed.
 
 **Learning Center** - Built-in curriculum with 11 lessons across 5 categories, prerequisite gating, and progress tracking.
 
@@ -97,7 +97,7 @@ Consolidated Analysis (single LLM call, using redacted message)
     |-- Sentiment Analysis
     |-- Style Inference
     |-- Security Risk Scoring (regex pre-check + AI)
-    |-- Task Type & Complexity Classification
+    |-- Task Type & Complexity Classification (core + custom types from router rules)
     |-- Prompt Quality Scoring
     |
 Dynamic Router (rule evaluation)
@@ -257,7 +257,8 @@ See the [Demo Mode](#demo-mode) section below for details.
 - `PUT /api/router/config` - Update config (creates version)
 - `GET /api/router/config/history` - Version history
 - `POST /api/router/config/revert/:version` - Revert to version
-- `POST /api/router/config/edit-natural-language` - AI-powered config editing
+- `POST /api/router/config/edit-natural-language` - AI-powered batch config editing
+- `POST /api/router/config/generate-rule` - Generate a single rule from natural language description
 
 ### User Progress
 - `GET /api/progress` - Current user's progress
@@ -300,8 +301,8 @@ npm run test:watch
 ```
 
 Test coverage includes:
-- **Model selection** (39 tests) - catalog integrity, prompt analysis, optimal model selection, creative routing, cost estimation
-- **Dynamic router** (24 tests) - default rules, condition matching, first-match-wins evaluation
+- **Model selection** (42 tests) - catalog integrity, prompt analysis, optimal model selection, creative routing, cost estimation, custom task type handling
+- **Dynamic router** (32 tests) - default rules, condition matching, first-match-wins evaluation, custom task type extraction, mixed core+custom matching
 - **Encryption** (9 tests) - round-trip, random IV, unicode, tampering detection
 - **Consolidated analysis** (33 tests) - schema validation, security regex patterns, JSON parsing
 - **Demo budget** (23 tests) - per-session and per-IP rate limiting, daily budget cap, midnight reset, status reporting

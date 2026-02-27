@@ -19,8 +19,31 @@ import {
   type AvailableProviders,
 } from "../shared/model-selection";
 import { resolveAlias, getModelFamily } from "../shared/model-aliases";
-import type { RouterRule, ConsolidatedAnalysisResult, APIKeys } from "../shared/types";
+import { CORE_TASK_TYPES, type RouterRule, type ConsolidatedAnalysisResult, type APIKeys } from "../shared/types";
 import type { RouterConfig as DBRouterConfig } from "@shared/schema";
+
+// ---------------------------------------------------------------------------
+// Custom Task Type Extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Scans router rules for task types that aren't in the 6 core types.
+ * Returns each custom type with its description (if provided).
+ */
+export function extractCustomTaskTypes(
+  rules: RouterRule[]
+): { type: string; description: string }[] {
+  const coreSet = new Set<string>(CORE_TASK_TYPES);
+  const customs = new Map<string, string>();
+  for (const rule of rules) {
+    for (const t of rule.conditions.taskTypes ?? []) {
+      if (!coreSet.has(t) && !customs.has(t)) {
+        customs.set(t, rule.conditions.taskTypeDescriptions?.[t] ?? "");
+      }
+    }
+  }
+  return Array.from(customs.entries()).map(([type, description]) => ({ type, description }));
+}
 
 export interface RouterEvalContext {
   message: string;
@@ -380,20 +403,45 @@ const nlEditResultSchema = z.object({
 
 const AVAILABLE_MODELS = MODEL_CATALOG.map(m => `${m.model} (${m.displayName}, ${m.provider})`).join("\n  ");
 
+/**
+ * Build the "valid taskTypes" portion of NL prompts.
+ * Includes the 6 core types plus any custom types already in the rules.
+ */
+function buildTaskTypeList(rules: RouterRule[]): string {
+  const customTypes = extractCustomTaskTypes(rules);
+  const coreList = CORE_TASK_TYPES.join('", "');
+  if (customTypes.length === 0) {
+    return `  - Valid taskTypes: "${coreList}"`;
+  }
+  const customList = customTypes.map(ct => ct.type).join('", "');
+  const descriptions = customTypes
+    .filter(ct => ct.description)
+    .map(ct => `    - "${ct.type}": ${ct.description}`)
+    .join("\n");
+  let result = `  - Valid taskTypes: "${coreList}", "${customList}"`;
+  if (descriptions) {
+    result += `\n  - Custom type definitions:\n${descriptions}`;
+  }
+  result += "\n  - You may create new custom taskTypes (kebab-case) if the instruction requires categories beyond these.";
+  return result;
+}
+
 function buildNLEditPrompt(
   instruction: string,
   currentRules: RouterRule[],
   currentCatchAll: string[]
 ): string {
+  const taskTypeList = buildTaskTypeList(currentRules);
   return `You are a router configuration editor for an AI model routing system.
 
 The router has rules evaluated top-to-bottom. Each rule has:
 - id: unique identifier (use kebab-case, e.g. "my-new-rule")
 - name: human-readable name
 - enabled: boolean
-- conditions: { taskTypes?: string[], complexity?: string[], securityScoreMax?: number, promptLengthMin?: number, promptLengthMax?: number, customRegex?: string }
-  - Valid taskTypes: "coding", "math", "creative", "conversation", "analysis", "general"
+- conditions: { taskTypes?: string[], taskTypeDescriptions?: Record<string, string>, complexity?: string[], securityScoreMax?: number, promptLengthMin?: number, promptLengthMax?: number, customRegex?: string }
+${taskTypeList}
   - Valid complexity: "simple", "moderate", "complex"
+  - taskTypeDescriptions: map of custom type names to short descriptions (only needed for non-core types)
 - modelPriority: ordered list of model IDs (first available wins)
 - reasoning: explanation for this routing choice
 
@@ -420,6 +468,7 @@ Important:
 - Keep rule IDs stable when modifying existing rules
 - Generate new unique IDs for new rules
 - Only use valid model IDs from the available models list
+- When creating a new custom taskType, include it in taskTypeDescriptions with a short description
 - Return ONLY JSON, no markdown code fences or explanation`;
 }
 
@@ -548,5 +597,133 @@ export async function editConfigWithNaturalLanguage(
     catchAll: validated.catchAll,
     changeDescription: validated.changeDescription,
     diff,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Natural Language Single-Rule Generation
+// ---------------------------------------------------------------------------
+
+/** Zod schema for the LLM-generated rule response. */
+const nlRuleResultSchema = z.object({
+  rule: z.object({
+    id: z.string(),
+    name: z.string(),
+    enabled: z.boolean().default(true),
+    conditions: z.object({
+      taskTypes: z.array(z.string()).optional(),
+      taskTypeDescriptions: z.record(z.string(), z.string()).optional(),
+      complexity: z.array(z.string()).optional(),
+      securityScoreMax: z.number().optional(),
+      promptLengthMin: z.number().optional(),
+      promptLengthMax: z.number().optional(),
+      customRegex: z.string().optional(),
+    }),
+    modelPriority: z.array(z.string()),
+    reasoning: z.string(),
+  }),
+  isNewTaskType: z.boolean(),
+  newTaskType: z.string().optional(),
+  newTaskTypeDescription: z.string().optional(),
+});
+
+export interface NLRuleResult {
+  rule: RouterRule;
+  isNewTaskType: boolean;
+  newTaskType?: string;
+  newTaskTypeDescription?: string;
+}
+
+/**
+ * Build the prompt for single-rule generation from a natural language description.
+ */
+function buildNLRulePrompt(
+  description: string,
+  existingRules: RouterRule[]
+): string {
+  const taskTypeList = buildTaskTypeList(existingRules);
+  return `You are a router rule generator for an AI model routing system.
+
+Given a natural language description, create a single routing rule.
+
+Rule structure:
+- id: unique kebab-case identifier (e.g. "customer-support-gpt")
+- name: human-readable name
+- enabled: true
+- conditions: { taskTypes?: string[], taskTypeDescriptions?: Record<string, string>, complexity?: string[], securityScoreMax?: number, promptLengthMin?: number, promptLengthMax?: number, customRegex?: string }
+${taskTypeList}
+  - Valid complexity: "simple", "moderate", "complex"
+- modelPriority: ordered list of model IDs (first available wins)
+- reasoning: explanation for why this routing makes sense
+
+Available models:
+  ${AVAILABLE_MODELS}
+
+EXISTING RULES (for context — avoid duplicate IDs):
+${JSON.stringify(existingRules.map(r => ({ id: r.id, name: r.name, taskTypes: r.conditions.taskTypes })), null, 2)}
+
+USER DESCRIPTION:
+${description}
+
+Create a rule based on the description. If the description requires a task category that doesn't exist in the valid taskTypes list, create a new custom taskType (kebab-case, descriptive).
+
+Return ONLY a valid JSON object with this exact structure:
+{
+  "rule": {
+    "id": "rule-id",
+    "name": "Rule Name",
+    "enabled": true,
+    "conditions": { "taskTypes": [...], "taskTypeDescriptions": { "custom-type": "description" }, ... },
+    "modelPriority": [...],
+    "reasoning": "why this routing makes sense"
+  },
+  "isNewTaskType": true/false,
+  "newTaskType": "custom-type-name" (only if isNewTaskType is true),
+  "newTaskTypeDescription": "short description" (only if isNewTaskType is true)
+}
+
+Return ONLY JSON, no markdown code fences or explanation.`;
+}
+
+/**
+ * Use an LLM to generate a single router rule from a natural language description.
+ * Can create new custom task types when needed.
+ */
+export async function generateRuleFromNaturalLanguage(
+  description: string,
+  existingRules: RouterRule[],
+  apiKeys: APIKeys
+): Promise<NLRuleResult> {
+  const providers: AvailableProviders = {
+    gemini: !!apiKeys.gemini,
+    openai: !!apiKeys.openai,
+    anthropic: !!apiKeys.anthropic,
+  };
+
+  const model = selectCheapestModel(providers);
+  if (!model) {
+    throw new Error("No API keys available for rule generation");
+  }
+
+  const apiKey = apiKeys[model.provider] || "";
+  const prompt = buildNLRulePrompt(description, existingRules);
+
+  const rawResponse = await callNLEdit(prompt, model, apiKey);
+
+  // Extract JSON (handle markdown code fences)
+  let jsonStr = rawResponse;
+  const jsonMatch = rawResponse.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1].trim();
+  }
+
+  const parsed = JSON.parse(jsonStr);
+  const validated = nlRuleResultSchema.parse(parsed);
+
+  return {
+    rule: validated.rule as RouterRule,
+    isNewTaskType: validated.isNewTaskType,
+    newTaskType: validated.newTaskType,
+    newTaskTypeDescription: validated.newTaskTypeDescription,
   };
 }

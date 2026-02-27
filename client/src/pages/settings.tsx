@@ -382,6 +382,7 @@ export default function Settings() {
             }}
             placeholder={keyValue && !isFresh ? "Key saved — click to replace" : `Enter your ${label}`}
             data-testid={`input-${provider}-key`}
+            autoComplete="off"
           />
           {isFresh ? (
             <Button

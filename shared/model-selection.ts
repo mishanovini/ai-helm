@@ -44,7 +44,8 @@ export interface PromptAnalysis {
   estimatedTokens: number;
   isSimpleTask: boolean;
   isSpeedCritical: boolean;
-  taskType: "coding" | "math" | "creative" | "conversation" | "analysis" | "general";
+  /** Task type — one of the 6 core types or a custom type from router rules. */
+  taskType: string;
   requiresMultimodal: boolean;
   requiresDeepReasoning: boolean;
 }
@@ -124,7 +125,7 @@ export function analyzePrompt(prompt: string): PromptAnalysis {
   const speedKeywords = ["quick", "fast", "urgent", "real-time", "immediately"];
   const isSpeedCritical = speedKeywords.some((kw) => lowerPrompt.includes(kw));
 
-  let taskType: PromptAnalysis["taskType"] = "general";
+  let taskType = "general";
   if (lowerPrompt.match(/\b(code|coding|program|debug|refactor|function|api|bug)\b/)) {
     taskType = "coding";
   } else if (lowerPrompt.match(/\b(math|calculate|equation|solve|theorem|proof)\b/)) {
@@ -161,7 +162,8 @@ export function analyzePrompt(prompt: string): PromptAnalysis {
  * the keyword-based heuristic in `analyzePrompt()`.
  */
 export interface LLMAnalysisOverride {
-  taskType: PromptAnalysis["taskType"];
+  /** Core or custom task type string. Custom types fall through to default model selection. */
+  taskType: string;
   complexity: "simple" | "moderate" | "complex";
 }
 

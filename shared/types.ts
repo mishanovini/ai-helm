@@ -1,8 +1,19 @@
 /**
  * Shared type definitions used across client and server
+ *
+ * Task types are extensible: the 6 core types are always available,
+ * and users can define custom types via router rules. Custom types
+ * flow through the analysis pipeline and are matched during routing.
  */
 
 export type Provider = 'gemini' | 'openai' | 'anthropic';
+
+/** The 6 built-in task types. Custom types extend beyond this list. */
+export const CORE_TASK_TYPES = [
+  "coding", "math", "creative", "conversation", "analysis", "general",
+] as const;
+
+export type CoreTaskType = (typeof CORE_TASK_TYPES)[number];
 
 export interface APIKeys {
   gemini: string;
@@ -44,7 +55,7 @@ export interface ConsolidatedAnalysisResult {
   style: "formal" | "casual" | "technical" | "concise" | "verbose" | "neutral";
   securityScore: number;
   securityExplanation: string;
-  taskType: "coding" | "math" | "creative" | "conversation" | "analysis" | "general";
+  taskType: string;
   complexity: "simple" | "moderate" | "complex";
   promptQuality: PromptQuality;
 }
@@ -55,6 +66,8 @@ export interface RouterRule {
   enabled: boolean;
   conditions: {
     taskTypes?: string[];
+    /** Descriptions for custom (non-core) task types — injected into LLM prompt */
+    taskTypeDescriptions?: Record<string, string>;
     complexity?: string[];
     securityScoreMax?: number;
     promptLengthMin?: number;

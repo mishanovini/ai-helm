@@ -16,11 +16,11 @@ import {
   type CostTier,
   type Provider,
 } from "../shared/model-selection";
-import { evaluateRules } from "./dynamic-router";
+import { evaluateRules, extractCustomTaskTypes } from "./dynamic-router";
 import { generateResponse, generateResponseStream } from "./response-generator";
 import { buildSystemContext } from "./system-context";
 import { storage } from "./storage";
-import type { APIKeys, ConversationMessage, AnalysisUpdate, ConsolidatedAnalysisResult } from "../shared/types";
+import type { APIKeys, ConversationMessage, AnalysisUpdate, ConsolidatedAnalysisResult, RouterRule } from "../shared/types";
 
 export type { APIKeys, ConversationMessage, AnalysisUpdate };
 
@@ -117,6 +117,27 @@ export async function runAnalysisJob(
     });
 
     // ========================================================================
+    // Phase 0.5: Load custom task types from router config
+    // ========================================================================
+
+    // Custom types from router rules are injected into the analysis prompt
+    // so the LLM can classify messages into custom categories.
+    let customTaskTypes: { type: string; description: string }[] = [];
+    try {
+      const orgId = job.orgId || "";
+      const routerConfig = orgId
+        ? (await storage.getActiveRouterConfig(orgId, job.userId)
+          || await storage.getActiveRouterConfig(orgId))
+        : undefined;
+      if (routerConfig) {
+        const rules = (routerConfig.rules as RouterRule[]) || [];
+        customTaskTypes = extractCustomTaskTypes(rules);
+      }
+    } catch {
+      // Non-critical — proceed with core types only
+    }
+
+    // ========================================================================
     // Phase 1: Consolidated Analysis (single LLM call replaces 4 separate calls)
     // ========================================================================
 
@@ -128,7 +149,7 @@ export async function runAnalysisJob(
 
     let analysis: ConsolidatedAnalysisResult | undefined;
     try {
-      analysis = await runConsolidatedAnalysis(safeMessage, analysisModel, analysisApiKey);
+      analysis = await runConsolidatedAnalysis(safeMessage, analysisModel, analysisApiKey, customTaskTypes);
     } catch (firstError: any) {
       console.warn(`Consolidated analysis failed with ${analysisModel.provider}: ${firstError.message}`);
       // Primary analysis model failed — try fallback providers before giving up
@@ -138,7 +159,7 @@ export async function runAnalysisJob(
           console.warn(
             `Analysis failed with ${analysisModel.provider}, retrying with ${fallbackModel.provider}`
           );
-          analysis = await runConsolidatedAnalysis(safeMessage, fallbackModel, fallbackKey);
+          analysis = await runConsolidatedAnalysis(safeMessage, fallbackModel, fallbackKey, customTaskTypes);
           // Update analysis model/key for subsequent phases (prompt opt, param tuning, validation)
           Object.assign(analysisModel, fallbackModel);
           analysisApiKey = fallbackKey;

@@ -15,7 +15,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { z } from "zod";
 import type { ModelOption } from "../shared/model-selection";
-import type { ConsolidatedAnalysisResult, PromptQuality } from "../shared/types";
+import { CORE_TASK_TYPES, type ConsolidatedAnalysisResult, type PromptQuality } from "../shared/types";
 import {
   analyzeIntent,
   analyzeSentiment,
@@ -32,7 +32,7 @@ const consolidatedSchema = z.object({
   style: z.enum(["formal", "casual", "technical", "concise", "verbose", "neutral"]).catch("neutral"),
   securityScore: z.coerce.number().min(0).max(10).default(0),
   securityExplanation: z.string().default("No significant security concerns"),
-  taskType: z.enum(["coding", "math", "creative", "conversation", "analysis", "general"]).catch("general"),
+  taskType: z.string().default("general"),
   complexity: z.enum(["simple", "moderate", "complex"]).catch("simple"),
   promptQuality: z.object({
     score: z.coerce.number().min(0).max(100).default(50),
@@ -134,14 +134,51 @@ function securityPreCheck(message: string): { floorScore: number; flags: string[
   return { floorScore, flags };
 }
 
+/** Custom task type definition for dynamic prompt injection. */
+export interface CustomTaskType {
+  type: string;
+  description: string;
+}
+
+/**
+ * Build the taskType portion of the analysis system prompt.
+ * Includes core types always; appends custom types when provided.
+ */
+function buildTaskTypeInstruction(
+  customTypes?: CustomTaskType[]
+): string {
+  const coreList = CORE_TASK_TYPES.join('" | "');
+  if (!customTypes || customTypes.length === 0) {
+    return `"taskType": "${coreList}",`;
+  }
+
+  const customList = customTypes.map(ct => ct.type).join('" | "');
+  const descriptions = customTypes
+    .filter(ct => ct.description)
+    .map(ct => `  - "${ct.type}": ${ct.description}`)
+    .join("\n");
+
+  let instruction = `"taskType": "${coreList}" | "${customList}",`;
+  if (descriptions) {
+    instruction += `\n\n  Custom taskType definitions (use these when the message matches):\n${descriptions}`;
+  }
+  return instruction;
+}
+
 /**
  * Call the LLM with a single consolidated analysis prompt.
+ *
+ * @param customTaskTypes - Additional task types from router rules to include
+ *   in the LLM prompt, enabling classification into custom categories.
  */
 async function callConsolidatedAnalysis(
   message: string,
   model: ModelOption,
-  apiKey: string
+  apiKey: string,
+  customTaskTypes?: CustomTaskType[]
 ): Promise<string> {
+  const taskTypeInstruction = buildTaskTypeInstruction(customTaskTypes);
+
   const systemPrompt = `You are an advanced AI analysis engine. Analyze the user's message and return a JSON object with ALL of the following fields. Respond with ONLY valid JSON, no markdown or explanation.
 
 {
@@ -151,7 +188,7 @@ async function callConsolidatedAnalysis(
   "style": "formal" | "casual" | "technical" | "concise" | "verbose" | "neutral",
   "securityScore": 0-10 integer (0=safe, 10=critical threat),
   "securityExplanation": "brief explanation if score > 2, else 'No significant security concerns'",
-  "taskType": "coding" | "math" | "creative" | "conversation" | "analysis" | "general",
+  ${taskTypeInstruction}
   "complexity": "simple" | "moderate" | "complex",
   "promptQuality": {
     "score": 0-100 overall quality score,
@@ -220,18 +257,23 @@ Provide 1-3 short improvement suggestions. If the prompt is already excellent, s
  * 3. Parse + validate JSON with Zod
  * 4. Apply security floor score from pre-check
  * 5. On failure, fall back to individual analysis functions
+ *
+ * @param customTaskTypes - Optional custom task types from router rules.
+ *   When provided, these are injected into the LLM prompt so it can classify
+ *   messages into custom categories beyond the 6 core types.
  */
 export async function runConsolidatedAnalysis(
   message: string,
   model: ModelOption,
-  apiKey: string
+  apiKey: string,
+  customTaskTypes?: CustomTaskType[]
 ): Promise<ConsolidatedAnalysisResult> {
   // Step 1: Security pre-check
   const { floorScore, flags } = securityPreCheck(message);
 
   try {
-    // Step 2: Single LLM call
-    const rawResponse = await callConsolidatedAnalysis(message, model, apiKey);
+    // Step 2: Single LLM call (with custom types injected into prompt)
+    const rawResponse = await callConsolidatedAnalysis(message, model, apiKey, customTaskTypes);
 
     // Step 3: Extract JSON from response (handle markdown code blocks)
     let jsonStr = rawResponse;
@@ -315,7 +357,7 @@ async function runFallbackAnalysis(
 
   // Estimate task type and complexity from the message
   const lowerMsg = message.toLowerCase();
-  let taskType: ConsolidatedAnalysisResult["taskType"] = "general";
+  let taskType = "general";
   if (lowerMsg.match(/\b(code|coding|program|debug|refactor|function|api|bug)\b/))
     taskType = "coding";
   else if (lowerMsg.match(/\b(math|calculate|equation|solve|theorem|proof)\b/))

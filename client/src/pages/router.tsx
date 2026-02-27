@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -30,12 +50,22 @@ import {
   X,
   ArrowRight,
   Diff,
+  Sparkles,
 } from "lucide-react";
-import type { RouterRule } from "@shared/types";
+import { CORE_TASK_TYPES, type RouterRule } from "@shared/types";
 import { getModelFamilies } from "@shared/model-aliases";
 
-const TASK_TYPES = ["coding", "math", "creative", "conversation", "analysis", "general"];
 const COMPLEXITY_LEVELS = ["simple", "moderate", "complex"];
+
+/** Built-in descriptions for the 6 core task types. */
+const CORE_TYPE_DESCRIPTIONS: Record<string, string> = {
+  coding: "Programming, debugging, and software development",
+  math: "Calculations, equations, proofs, and mathematical reasoning",
+  creative: "Writing, storytelling, and content creation",
+  conversation: "Casual dialogue, chat, and discussion",
+  analysis: "Research, data analysis, and investigation",
+  general: "General-purpose queries that don't fit other categories",
+};
 
 /** Build the model option list from the shared model-aliases registry. */
 const MODEL_OPTIONS = getModelFamilies().map(f => ({
@@ -406,6 +436,7 @@ function RuleCard({
   onDelete,
   onMove,
   totalRules,
+  allTaskTypes,
   readOnly = false,
 }: {
   rule: RouterRule;
@@ -414,9 +445,12 @@ function RuleCard({
   onDelete: () => void;
   onMove: (direction: "up" | "down") => void;
   totalRules: number;
+  /** All known task types: core + custom from all rules. */
+  allTaskTypes: string[];
   readOnly?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [customTypeInput, setCustomTypeInput] = useState("");
 
   const toggleTaskType = (type: string) => {
     const current = rule.conditions.taskTypes || [];
@@ -427,6 +461,19 @@ function RuleCard({
       ...rule,
       conditions: { ...rule.conditions, taskTypes: updated },
     });
+  };
+
+  /** Add a custom task type from the input field. */
+  const addCustomType = () => {
+    const normalized = customTypeInput.trim().toLowerCase().replace(/\s+/g, "-");
+    if (!normalized || normalized.length < 2 || normalized.length > 40) return;
+    if ((rule.conditions.taskTypes || []).includes(normalized)) return;
+    const updatedTypes = [...(rule.conditions.taskTypes || []), normalized];
+    onUpdate({
+      ...rule,
+      conditions: { ...rule.conditions, taskTypes: updatedTypes },
+    });
+    setCustomTypeInput("");
   };
 
   const toggleComplexity = (level: string) => {
@@ -555,17 +602,51 @@ function RuleCard({
 
                 <div>
                   <Label className="text-xs">Task Types</Label>
-                  <div className="flex gap-2 mt-1 flex-wrap">
-                    {TASK_TYPES.map(t => (
-                      <Badge
-                        key={t}
-                        variant={(rule.conditions.taskTypes || []).includes(t) ? "default" : "outline"}
-                        className="cursor-pointer"
-                        onClick={() => toggleTaskType(t)}
-                      >
-                        {t}
-                      </Badge>
-                    ))}
+                  <TooltipProvider delayDuration={300}>
+                    <div className="flex gap-2 mt-1 flex-wrap">
+                      {allTaskTypes.map(t => {
+                        const isCore = (CORE_TASK_TYPES as readonly string[]).includes(t);
+                        const isSelected = (rule.conditions.taskTypes || []).includes(t);
+                        const description = isCore
+                          ? CORE_TYPE_DESCRIPTIONS[t]
+                          : rule.conditions.taskTypeDescriptions?.[t] || "Custom task type";
+                        return (
+                          <Tooltip key={t}>
+                            <TooltipTrigger asChild>
+                              <Badge
+                                variant={isSelected ? "default" : "outline"}
+                                className={`cursor-pointer ${!isCore ? "border-dashed" : ""}`}
+                                onClick={() => toggleTaskType(t)}
+                              >
+                                {t}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-[200px]">
+                              <p className="text-xs">{description}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })}
+                    </div>
+                  </TooltipProvider>
+                  {/* Custom type input */}
+                  <div className="flex gap-1 mt-2">
+                    <Input
+                      value={customTypeInput}
+                      onChange={e => setCustomTypeInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addCustomType(); } }}
+                      placeholder="Add custom type..."
+                      className="h-7 text-xs flex-1 max-w-[200px]"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2"
+                      onClick={addCustomType}
+                      disabled={!customTypeInput.trim()}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </Button>
                   </div>
                 </div>
 
@@ -693,9 +774,25 @@ export default function Router() {
   const [nlInstruction, setNlInstruction] = useState("");
   const [nlResult, setNlResult] = useState<NLEditResult | null>(null);
 
+  // NL single-rule generation dialog
+  const [showNlRuleDialog, setShowNlRuleDialog] = useState(false);
+  const [nlRuleDescription, setNlRuleDescription] = useState("");
+
   // History comparison state
   const [compareLeft, setCompareLeft] = useState<any | null>(null);
   const [compareRight, setCompareRight] = useState<any | null>(null);
+
+  /** All known task types: the 6 core types + any custom types found in current rules. */
+  const allTaskTypes = useMemo(() => {
+    const core = [...CORE_TASK_TYPES] as string[];
+    const customSet = new Set<string>();
+    rules.forEach(r => {
+      r.conditions.taskTypes?.forEach(t => {
+        if (!core.includes(t)) customSet.add(t);
+      });
+    });
+    return [...core, ...Array.from(customSet)];
+  }, [rules]);
 
   // Fetch config
   const { data, isLoading } = useQuery({
@@ -806,6 +903,59 @@ export default function Router() {
     },
     onError: (err: any) => {
       toast({ title: "Failed to create config", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // NL single-rule generation mutation
+  const nlRuleMutation = useMutation({
+    mutationFn: async (description: string) => {
+      const storedKeys = localStorage.getItem("aihelm_api_keys");
+      const apiKeys = storedKeys ? JSON.parse(storedKeys) : {};
+
+      const res = await fetch("/api/router/config/generate-rule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description,
+          currentRules: rules,
+          ...(apiKeys.gemini || apiKeys.openai || apiKeys.anthropic ? { apiKeys } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }));
+        throw new Error(err.error || "Failed to generate rule");
+      }
+      return res.json() as Promise<{
+        rule: RouterRule;
+        isNewTaskType: boolean;
+        newTaskType?: string;
+        newTaskTypeDescription?: string;
+      }>;
+    },
+    onSuccess: (result) => {
+      setRules([...rules, result.rule]);
+      setHasUnsavedChanges(true);
+      setShowNlRuleDialog(false);
+      setNlRuleDescription("");
+
+      if (result.isNewTaskType && result.newTaskType) {
+        toast({
+          title: "Rule created with new task type",
+          description: `New type "${result.newTaskType}" created. Review and save when ready.`,
+        });
+      } else {
+        toast({
+          title: "Rule created",
+          description: "Review the generated rule and save when ready.",
+        });
+      }
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Rule generation failed",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -946,6 +1096,7 @@ export default function Router() {
                       rule={rule}
                       index={i}
                       totalRules={rules.length}
+                      allTaskTypes={allTaskTypes}
                       onUpdate={updated => updateRule(i, updated)}
                       onDelete={() => deleteRule(i)}
                       onMove={dir => moveRule(i, dir)}
@@ -955,10 +1106,25 @@ export default function Router() {
                 </div>
 
                 {canEdit && (
-                  <Button variant="outline" onClick={addRule} className="w-full">
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Rule
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="w-full">
+                        <Plus className="h-4 w-4 mr-1" />
+                        Add Rule
+                        <ChevronDown className="h-3 w-3 ml-1" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="center" className="w-56">
+                      <DropdownMenuItem onClick={addRule}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Blank Rule
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setShowNlRuleDialog(true)}>
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        Describe with AI
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
 
                 {/* Catch-All */}
@@ -1255,6 +1421,50 @@ export default function Router() {
             )}
           </TabsContent>
         </Tabs>
+
+        {/* ====== NL Rule Generation Dialog ====== */}
+        <Dialog open={showNlRuleDialog} onOpenChange={setShowNlRuleDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                Describe Your Rule
+              </DialogTitle>
+              <DialogDescription>
+                Describe what you want this rule to do in plain English. AI will generate the rule for you.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Textarea
+                value={nlRuleDescription}
+                onChange={e => setNlRuleDescription(e.target.value)}
+                placeholder="e.g. Route customer support questions to GPT for fast, empathetic responses"
+                className="min-h-[100px]"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowNlRuleDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => nlRuleMutation.mutate(nlRuleDescription.trim())}
+                disabled={!nlRuleDescription.trim() || nlRuleMutation.isPending}
+              >
+                {nlRuleMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-1" />
+                    Generate Rule
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

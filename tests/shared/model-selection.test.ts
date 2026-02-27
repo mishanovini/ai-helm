@@ -290,3 +290,41 @@ describe("getProviderStatus", () => {
     expect(status).not.toContain("OpenAI");
   });
 });
+
+// ============================================================================
+// Custom taskType handling in model selection
+// ============================================================================
+
+describe("selectOptimalModel with custom taskTypes", () => {
+  const allProviders: AvailableProviders = { gemini: true, openai: true, anthropic: true };
+
+  it("should not crash on unknown custom taskType", () => {
+    const result = selectOptimalModel(
+      "Help me with customer support",
+      allProviders,
+      { taskType: "customer-support", complexity: "moderate" }
+    );
+    expect(result.primary).toBeDefined();
+    expect(result.reasoning).toBeDefined();
+  });
+
+  it("should fall through switch to default for custom types", () => {
+    const result = selectOptimalModel(
+      "Research legal precedents for intellectual property case involving software patents. Analyze multiple jurisdictions.",
+      allProviders,
+      { taskType: "legal-research", complexity: "complex" }
+    );
+    // Custom types should still get a valid model (deep reasoning or default fallback)
+    expect(result.primary).toBeDefined();
+    expect(result.primary.provider).toBeTruthy();
+  });
+
+  it("should handle empty string taskType without crashing", () => {
+    const result = selectOptimalModel(
+      "test message",
+      allProviders,
+      { taskType: "", complexity: "simple" }
+    );
+    expect(result.primary).toBeDefined();
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { getDefaultRules } from "../../server/dynamic-router";
-import type { ConsolidatedAnalysisResult } from "../../shared/types";
+import { getDefaultRules, extractCustomTaskTypes } from "../../server/dynamic-router";
+import { CORE_TASK_TYPES, type RouterRule, type ConsolidatedAnalysisResult } from "../../shared/types";
 import type { AvailableProviders } from "../../shared/model-selection";
 
 // The evaluateRulesInternal function is not exported, so we test via getDefaultRules
@@ -338,5 +338,150 @@ describe("First-match-wins evaluation", () => {
 
     expect(matched).toBe(false);
     // This would hit the catch-all in the real evaluateRulesInternal
+  });
+});
+
+// ============================================================================
+// extractCustomTaskTypes
+// ============================================================================
+
+describe("extractCustomTaskTypes", () => {
+  it("should return empty array when rules only use core types", () => {
+    const rules: RouterRule[] = [
+      {
+        id: "r1",
+        name: "Coding",
+        enabled: true,
+        conditions: { taskTypes: ["coding", "math"] },
+        modelPriority: ["gemini-flash"],
+        reasoning: "test",
+      },
+    ];
+    expect(extractCustomTaskTypes(rules)).toEqual([]);
+  });
+
+  it("should extract custom types from rules", () => {
+    const rules: RouterRule[] = [
+      {
+        id: "r1",
+        name: "Customer Support",
+        enabled: true,
+        conditions: {
+          taskTypes: ["customer-support", "coding"],
+          taskTypeDescriptions: { "customer-support": "Help with product issues" },
+        },
+        modelPriority: ["gpt"],
+        reasoning: "GPT for customer support",
+      },
+    ];
+    const result = extractCustomTaskTypes(rules);
+    expect(result).toEqual([
+      { type: "customer-support", description: "Help with product issues" },
+    ]);
+  });
+
+  it("should deduplicate custom types across multiple rules", () => {
+    const rules: RouterRule[] = [
+      {
+        id: "r1",
+        name: "Rule 1",
+        enabled: true,
+        conditions: { taskTypes: ["legal-research"] },
+        modelPriority: ["claude-opus"],
+        reasoning: "test",
+      },
+      {
+        id: "r2",
+        name: "Rule 2",
+        enabled: true,
+        conditions: { taskTypes: ["legal-research", "customer-support"] },
+        modelPriority: ["gpt"],
+        reasoning: "test",
+      },
+    ];
+    const result = extractCustomTaskTypes(rules);
+    expect(result).toHaveLength(2);
+    expect(result.map(r => r.type)).toContain("legal-research");
+    expect(result.map(r => r.type)).toContain("customer-support");
+  });
+
+  it("should return empty description when taskTypeDescriptions is missing", () => {
+    const rules: RouterRule[] = [
+      {
+        id: "r1",
+        name: "Rule",
+        enabled: true,
+        conditions: { taskTypes: ["my-custom-type"] },
+        modelPriority: ["gpt"],
+        reasoning: "test",
+      },
+    ];
+    const result = extractCustomTaskTypes(rules);
+    expect(result).toEqual([{ type: "my-custom-type", description: "" }]);
+  });
+
+  it("should not include core task types", () => {
+    const rules: RouterRule[] = [
+      {
+        id: "r1",
+        name: "All types",
+        enabled: true,
+        conditions: {
+          taskTypes: [...CORE_TASK_TYPES, "custom-one", "custom-two"],
+        },
+        modelPriority: ["gpt"],
+        reasoning: "test",
+      },
+    ];
+    const result = extractCustomTaskTypes(rules);
+    expect(result).toHaveLength(2);
+    expect(result.every(r => !(CORE_TASK_TYPES as readonly string[]).includes(r.type))).toBe(true);
+  });
+});
+
+// ============================================================================
+// Custom taskType matching
+// ============================================================================
+
+describe("Custom taskType matching", () => {
+  it("should match rules with custom taskTypes", () => {
+    const rule: RouterRule = {
+      id: "custom-1",
+      name: "Customer Support",
+      enabled: true,
+      conditions: { taskTypes: ["customer-support"] },
+      modelPriority: ["gpt"],
+      reasoning: "GPT for customer support",
+    };
+    const analysis = makeAnalysis({ taskType: "customer-support" as any });
+    expect(matchesRule(rule, analysis, "help me with my order")).toBe(true);
+  });
+
+  it("should not match when custom taskType differs", () => {
+    const rule: RouterRule = {
+      id: "custom-1",
+      name: "Customer Support",
+      enabled: true,
+      conditions: { taskTypes: ["customer-support"] },
+      modelPriority: ["gpt"],
+      reasoning: "GPT for customer support",
+    };
+    const analysis = makeAnalysis({ taskType: "legal-research" as any });
+    expect(matchesRule(rule, analysis, "research case law")).toBe(false);
+  });
+
+  it("should match when rule has mix of core and custom types", () => {
+    const rule: RouterRule = {
+      id: "mixed-1",
+      name: "Mixed",
+      enabled: true,
+      conditions: { taskTypes: ["coding", "customer-support"] },
+      modelPriority: ["gpt"],
+      reasoning: "test",
+    };
+    const analysisCustom = makeAnalysis({ taskType: "customer-support" as any });
+    const analysisCore = makeAnalysis({ taskType: "coding" });
+    expect(matchesRule(rule, analysisCustom, "test")).toBe(true);
+    expect(matchesRule(rule, analysisCore, "test")).toBe(true);
   });
 });
