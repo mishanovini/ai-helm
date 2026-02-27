@@ -45,6 +45,7 @@ export default function Home() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const lastAssistantMessageRef = useRef<HTMLDivElement>(null);
   const streamingMessageRef = useRef<string>("");
+  const hasScrolledToResponseRef = useRef(false);
   const [prefillMessage, setPrefillMessage] = useState<string | undefined>(undefined);
   const [showPromptLibrary, setShowPromptLibrary] = useState(false);
   const [activePreset, setActivePreset] = useState<ActivePreset | null>(null);
@@ -103,9 +104,11 @@ export default function Home() {
     };
   }, []);
 
-  // Auto-scroll to top of last assistant message
+  // Auto-scroll to top of last assistant message only once when response starts,
+  // so the user can freely scroll during streaming without being yanked back.
   useEffect(() => {
-    if (lastAssistantMessageRef.current) {
+    if (lastAssistantMessageRef.current && !hasScrolledToResponseRef.current) {
+      hasScrolledToResponseRef.current = true;
       lastAssistantMessageRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [messages]);
@@ -451,6 +454,9 @@ export default function Home() {
       content,
       timestamp
     }]);
+
+    // Allow auto-scroll to fire once for the upcoming assistant response
+    hasScrolledToResponseRef.current = false;
 
     // Use LLM to classify whether deep research is warranted, with heuristic fallback
     let needsDeepResearch = false;
