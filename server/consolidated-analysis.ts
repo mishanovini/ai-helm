@@ -304,6 +304,20 @@ export async function runConsolidatedAnalysis(
       securityExplanation: finalSecurityExplanation,
     };
   } catch (error: any) {
+    // Check if this is an auth/permission error — if so, throw immediately
+    // so the orchestrator's multi-provider fallback tries a different provider
+    // instead of retrying individual calls with the same broken key.
+    const status = error?.status || error?.statusCode || error?.response?.status;
+    const msg = error.message || String(error);
+    const isAuthError = status === 401 || status === 403
+      || msg.includes("insufficient permissions")
+      || msg.includes("Missing scopes")
+      || msg.includes("invalid_api_key");
+
+    if (isAuthError) {
+      throw error;
+    }
+
     console.warn(
       "Consolidated analysis failed, falling back to individual calls:",
       error.message
