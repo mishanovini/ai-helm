@@ -312,7 +312,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create a new conversation
   app.post("/api/conversations", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       const { title } = req.body;
@@ -330,7 +330,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // List user's conversations
   app.get("/api/conversations", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       const convs = await storage.listConversationsByUser(userId);
@@ -344,7 +344,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get messages for a conversation
   app.get("/api/conversations/:id/messages", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       // Verify conversation belongs to this user
@@ -364,7 +364,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Delete a conversation
   app.delete("/api/conversations/:id", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       const conversation = await storage.getConversation(req.params.id);
@@ -383,7 +383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Search conversations
   app.get("/api/conversations/search", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       const query = (req.query.q as string || "").trim();

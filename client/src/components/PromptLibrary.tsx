@@ -42,6 +42,12 @@ import {
   Sparkles,
   BarChart3,
   Code,
+  Languages,
+  Presentation,
+  Share2,
+  Lightbulb,
+  Briefcase,
+  Swords,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -105,6 +111,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
   BarChart3,
   Code,
   Bot,
+  Languages,
+  Presentation,
+  Share2,
+  Lightbulb,
+  Briefcase,
+  Swords,
 };
 
 function resolveIcon(name: string | null): LucideIcon {

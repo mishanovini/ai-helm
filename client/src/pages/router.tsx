@@ -699,10 +699,10 @@ function RuleCard({
 
                 <div>
                   <Label className="text-xs">Reasoning</Label>
-                  <Input
+                  <Textarea
                     value={rule.reasoning}
                     onChange={e => onUpdate({ ...rule, reasoning: e.target.value })}
-                    className="h-8 mt-1"
+                    className="min-h-[60px] mt-1 text-sm resize-y"
                     placeholder="Why this model for these conditions..."
                   />
                 </div>

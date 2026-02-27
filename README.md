@@ -30,11 +30,13 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 **Deep Research Detection** - LLM-based classifier determines whether a prompt warrants extended multi-source research (with heuristic fallback), replacing keyword-only detection.
 
-**Demo Mode** - Public-facing demo with server-provided API keys, three-tier abuse protection (per-session, per-IP, and daily budget rate limiting), and automatic key injection. Demo keys manageable via admin console with encrypted file persistence. Users with their own keys bypass all demo limits.
+**Demo Mode** - Public-facing demo with server-provided API keys, three-tier abuse protection (per-session, per-IP, and daily budget rate limiting), and automatic key injection. Demo keys manageable via admin console with encrypted file persistence. Users with their own keys bypass all demo limits. Conversation history sidebar and full REST API available in demo mode via shared demo-system identity.
 
 **Beginner-Friendly Home Page** - Chat-dominant layout (70/30 split) with personalized welcome screen showing suggested prompts for new and returning users. Collapsible process log footer that shows real-time pipeline activity without overwhelming the interface. Analysis dashboard reordered by relevance: model+cost reasoning, prompt quality (always visible), optimized prompt, then collapsible details.
 
-**Prompt Library & AI Assistants** - Database-backed catalog of 10 prompt templates and 5 AI assistant presets (Code Tutor, Writing Coach, Research Assistant, Creative Brainstormer, Data Analyst). Browseable via a slide-out sheet with search, category filtering, and usage tracking. Templates fill the chat input; presets activate a custom system prompt for the conversation.
+**Prompt Library & AI Assistants** - Database-backed catalog of 15 prompt templates and 8 AI assistant presets (Code Tutor, Writing Coach, Research Assistant, Creative Brainstormer, Data Analyst, Career Coach, Language Tutor, Debate Partner). Browseable via a slide-out sheet with search, category filtering, and usage tracking. Templates fill the chat input; presets activate a custom system prompt for the conversation.
+
+**Rich Markdown Rendering** - AI responses rendered as formatted Markdown with GFM support (headers, bold, lists, code blocks, tables) via react-markdown with Tailwind Typography prose styling.
 
 **System Context Injection** - Three-layer system prompt construction: base context (what AI Helm is), user context (experience level and prompt quality trends), and preset context (active AI assistant persona). Injected per-provider: OpenAI system message, Anthropic system parameter, Gemini systemInstruction.
 
@@ -308,7 +310,10 @@ Test coverage includes:
 - **Demo budget** (23 tests) - per-session and per-IP rate limiting, daily budget cap, midnight reset, status reporting
 - **Model aliases & discovery** (35 tests) - alias registry, pattern matching, resolution, reverse lookup, update/reset
 - **DLP scanner** (26 tests) - credit card (Luhn), SSN, API key, email, phone, IP detection, false-positive filtering, redaction
-- **Provider status** (19 tests) - Atlassian/Google API parsing, degraded/outage detection, caching, error handling
+- **Provider status** (20 tests) - Atlassian/Google API parsing, degraded/outage detection, caching, error handling, component name resolution
+- **Prompt templates** (8 tests) - seeding, idempotent inserts, usage tracking, API CRUD
+- **System context** (10 tests) - system prompt construction, user context injection, preset activation
+- **Provider rerouting** (15 tests) - fallback logic, auth error retry, multi-provider cascading
 
 ## Demo Mode
 

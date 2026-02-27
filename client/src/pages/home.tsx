@@ -49,7 +49,8 @@ export default function Home() {
   const [showPromptLibrary, setShowPromptLibrary] = useState(false);
   const [activePreset, setActivePreset] = useState<ActivePreset | null>(null);
 
-  const showSidebar = authRequired && isAuthenticated;
+  // Show sidebar when authenticated OR in demo mode (auth not required)
+  const showSidebar = !authRequired || isAuthenticated;
 
   // Fetch user progress for personalized welcome screen suggestions
   const { data: userProgress } = useQuery<UserProgressSummary>({
