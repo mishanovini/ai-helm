@@ -112,6 +112,37 @@ function getClientIP(req: IncomingMessage): string {
   return req.socket.remoteAddress || 'unknown';
 }
 
+/**
+ * Resolves the effective user ID for a request.
+ * In auth mode: uses the authenticated user ID.
+ * In demo mode: looks up (or creates) an IP-based demo user,
+ * matching the same identity the WebSocket handler uses.
+ */
+async function resolveUserId(req: any): Promise<string | null> {
+  if (req.user?.id) return req.user.id;
+  if (isAuthRequired()) return null;
+  if (!isDatabaseAvailable()) return null;
+
+  try {
+    const ip = getClientIP(req);
+    const demoEmail = `demo-${ip.replace(/[.:]/g, "-")}@demo.local`;
+    let demoUser = await storage.getUserByEmail(demoEmail);
+    if (!demoUser) {
+      demoUser = await storage.createUser({
+        email: demoEmail,
+        name: `Demo User (${ip})`,
+        orgId: DEMO_ORG_ID,
+        role: "user",
+      });
+      await storage.createUserProgress({ userId: demoUser.id });
+    }
+    return demoUser.id;
+  } catch (err) {
+    console.warn("[demo] Failed to resolve demo user:", err);
+    return null;
+  }
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
 
   // ========================================================================
@@ -312,7 +343,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create a new conversation
   app.post("/api/conversations", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      const userId = await resolveUserId(req);
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       const { title } = req.body;
@@ -330,7 +361,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // List user's conversations
   app.get("/api/conversations", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      const userId = await resolveUserId(req);
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       const convs = await storage.listConversationsByUser(userId);
@@ -344,7 +375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get messages for a conversation
   app.get("/api/conversations/:id/messages", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      const userId = await resolveUserId(req);
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       // Verify conversation belongs to this user
@@ -364,7 +395,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Delete a conversation
   app.delete("/api/conversations/:id", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      const userId = await resolveUserId(req);
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       const conversation = await storage.getConversation(req.params.id);
@@ -383,7 +414,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Search conversations
   app.get("/api/conversations/search", requireAuth, async (req, res) => {
     try {
-      const userId = req.user?.id || (isAuthRequired() ? null : "demo-system");
+      const userId = await resolveUserId(req);
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
       const query = (req.query.q as string || "").trim();
