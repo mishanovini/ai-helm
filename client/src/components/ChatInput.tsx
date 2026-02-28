@@ -9,7 +9,7 @@
  * - Stop button during generation
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +46,16 @@ export default function ChatInput({
   onOpenLibrary,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  /** Resize textarea to fit content, clamped between 2 rows and ~40% viewport */
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto"; // Reset so scrollHeight reflects content
+    const maxHeight = Math.min(window.innerHeight * 0.4, 320); // 40vh or 320px
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+  }, []);
 
   // Fill input when a prefill message arrives (e.g., from welcome screen suggestions)
   useEffect(() => {
@@ -54,6 +64,11 @@ export default function ChatInput({
       onPrefillConsumed?.();
     }
   }, [prefillMessage, onPrefillConsumed]);
+
+  // Auto-resize whenever message content changes
+  useEffect(() => {
+    autoResize();
+  }, [message, autoResize]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,13 +130,14 @@ export default function ChatInput({
         )}
 
         <Textarea
+          ref={textareaRef}
           data-testid="input-prompt"
           placeholder={activePreset ? `Ask ${activePreset.title}...` : "Enter your prompt..."}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={disabled}
-          className="resize-none min-h-16 max-h-32"
+          className="resize-none min-h-[3.5rem] overflow-y-auto"
           rows={2}
         />
         {isGenerating ? (
