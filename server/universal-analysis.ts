@@ -332,28 +332,30 @@ export async function optimizePrompt(
   model: ModelOption,
   apiKey: string
 ): Promise<{ optimizedPrompt: string }> {
-  const systemPrompt = `You are a prompt optimizer. Given a user's message, conversation history, and its analysis, create an improved version that:
-1. Includes relevant conversation context when necessary
-2. Clarifies the intent if needed
-3. Maintains the user's tone and style
-4. Makes the request more specific and actionable
-5. References previous messages if they provide helpful context
+  const systemPrompt = `You are a prompt optimizer. Your ONLY job is to improve the user's message so that an AI model will give a better response to it.
 
-Keep improvements subtle - don't completely rewrite unless necessary.
-If the prompt is already clear and well-formed, return it unchanged.
+Rules:
+1. Output ONLY the improved prompt text — nothing else. No explanations, no commentary, no preamble.
+2. Do NOT answer, respond to, or fulfill the user's request. You are rewriting the QUESTION, not providing the ANSWER.
+3. Clarify the intent and make the request more specific and actionable.
+4. Maintain the user's tone and style.
+5. If conversation history is provided, incorporate relevant context into the prompt.
+6. Keep improvements subtle — don't completely rewrite unless the original is vague.
+7. If the prompt is already clear and well-formed, return it unchanged.`;
 
-Respond with ONLY the optimized prompt, nothing else.`;
-
-  const conversationContext = conversationHistory.length > 0
+  // Only include meaningful conversation exchanges (skip if the only history
+  // is a single assistant greeting with no user replies yet)
+  const meaningfulHistory = conversationHistory.filter(msg => msg.role === "user");
+  const conversationContext = meaningfulHistory.length > 0
     ? `Previous conversation:\n${conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\n\n`
     : '';
 
-  const userPrompt = `${conversationContext}Current message: "${message}"
+  const userPrompt = `${conversationContext}User's message to optimize: "${message}"
 Intent: ${intent}
 Sentiment: ${sentiment}
 Style: ${style}
 
-Optimized version:`;
+Output the optimized prompt only:`;
 
   const optimizedPrompt = await runAnalysis(model, apiKey, systemPrompt, userPrompt);
   

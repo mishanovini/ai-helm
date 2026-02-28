@@ -242,18 +242,28 @@ export default function Home() {
       addLog("Prompting AI model...", "processing");
       setIsGenerating(true);
       streamingMessageRef.current = "";
-      // Add a placeholder assistant message for streaming
-      const timestamp = new Date().toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
+      // Add a placeholder assistant message for streaming, or reuse an
+      // existing one (retries/reroutes send generating again after response_clear)
+      setMessages(prev => {
+        const hasStreaming = prev.some(m => m.id === "assistant-streaming");
+        if (hasStreaming) {
+          // Reuse — just clear content for the retry
+          return prev.map(m =>
+            m.id === "assistant-streaming" ? { ...m, content: "" } : m
+          );
+        }
+        const timestamp = new Date().toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        });
+        return [...prev, {
+          id: "assistant-streaming",
+          role: "assistant" as const,
+          content: "",
+          timestamp
+        }];
       });
-      setMessages(prev => [...prev, {
-        id: `assistant-streaming`,
-        role: "assistant",
-        content: "",
-        timestamp
-      }]);
     } else if (phase === "response_chunk" && status === "processing") {
       // Streaming token - append to the current assistant message
       streamingMessageRef.current += payload.token;
