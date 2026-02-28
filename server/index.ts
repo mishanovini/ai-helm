@@ -16,26 +16,29 @@ app.use(express.urlencoded({ extended: false }));
 // Set up session + passport BEFORE routes
 setupAuth(app);
 
-// Ensure the default demo organization exists in the database
+// Ensure the default demo organization and seed data exist in the database
 if (isDatabaseAvailable()) {
+  // Demo org + router config (coupled — router config needs the org)
   ensureDemoOrg()
     .then(async (orgId) => {
       if (isDemoMode()) {
         log(`Demo mode active — default org: ${orgId}`);
       }
-      // Seed default router config if none exists for the demo org
       const existing = await storage.getActiveRouterConfig(DEMO_ORG_ID);
       if (!existing) {
         await seedDefaultConfig(DEMO_ORG_ID, "demo-system");
         log("Default router config seeded for demo org");
       }
-
-      // Seed prompt templates and AI assistant presets
-      await seedPromptTemplates();
     })
     .catch((err) => {
       console.error("[startup] Failed to ensure demo org:", err);
     });
+
+  // Prompt templates are global (not org-specific) — seed independently
+  // so they populate even if the demo org setup above fails.
+  seedPromptTemplates().catch((err) => {
+    console.error("[startup] Failed to seed prompt templates:", err);
+  });
 }
 
 app.use((req, res, next) => {
