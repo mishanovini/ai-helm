@@ -11,12 +11,12 @@ import {
   BookOpen,
   CheckCircle2,
   Circle,
-  Lock,
   Clock,
   ChevronRight,
   GraduationCap,
   ArrowLeft,
   Sparkles,
+  Lightbulb,
 } from "lucide-react";
 import {
   LESSONS,
@@ -208,18 +208,26 @@ function renderInlineSimple(text: string, key: number): React.ReactNode {
 function LessonView({
   lesson,
   isCompleted,
+  completedLessons,
   onComplete,
   onBack,
+  onNavigate,
 }: {
   lesson: Lesson;
   isCompleted: boolean;
+  completedLessons: string[];
   onComplete: () => void;
   onBack: () => void;
+  onNavigate: (lessonId: string) => void;
 }) {
   const difficultyColor =
     lesson.difficulty === "beginner" ? "text-green-400" :
     lesson.difficulty === "intermediate" ? "text-yellow-400" :
     "text-red-400";
+
+  const hasUnmetPrereqs =
+    lesson.prerequisites.length > 0 &&
+    !arePrerequisitesMet(lesson.id, completedLessons);
 
   return (
     <div>
@@ -227,6 +235,37 @@ function LessonView({
         <ArrowLeft className="h-4 w-4 mr-1" />
         Back to lessons
       </Button>
+
+      {hasUnmetPrereqs && (
+        <Card className="mb-4 border-yellow-500/30 bg-yellow-500/5">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-start gap-2">
+              <Lightbulb className="h-4 w-4 text-yellow-400 mt-0.5 shrink-0" />
+              <div className="text-sm">
+                <span className="text-yellow-400 font-medium">Recommended first: </span>
+                <span className="text-muted-foreground">
+                  This lesson builds on concepts from{" "}
+                  {lesson.prerequisites.map((prereqId, i) => {
+                    const prereq = getLesson(prereqId);
+                    return (
+                      <span key={prereqId}>
+                        {i > 0 && (i === lesson.prerequisites.length - 1 ? " and " : ", ")}
+                        <button
+                          className="text-primary hover:underline"
+                          onClick={() => onNavigate(prereqId)}
+                        >
+                          {prereq?.title || prereqId}
+                        </button>
+                      </span>
+                    );
+                  })}
+                  . Feel free to continue, or start there if this feels unfamiliar.
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -329,8 +368,10 @@ export default function Learn() {
           <LessonView
             lesson={lesson}
             isCompleted={completedLessons.includes(lesson.id)}
+            completedLessons={completedLessons}
             onComplete={() => completeLesson(lesson.id)}
             onBack={() => setSelectedLesson(null)}
+            onNavigate={(id) => setSelectedLesson(id)}
           />
         </div>
       </div>
@@ -405,6 +446,37 @@ export default function Learn() {
           })}
         </div>
 
+        {/* Recommended Starting Lessons */}
+        {!selectedCategory && completedCount === 0 && (
+          <Card className="mb-6 border-primary/30 bg-primary/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Lightbulb className="h-4 w-4 text-primary" />
+                Recommended Starting Lessons
+              </CardTitle>
+              <CardDescription className="text-xs">
+                New here? These beginner lessons are a great place to start.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {LESSONS.filter(l => l.prerequisites.length === 0 && l.difficulty === "beginner").map(lesson => (
+                  <Button
+                    key={lesson.id}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setSelectedLesson(lesson.id)}
+                  >
+                    {lesson.title}
+                    <ChevronRight className="h-3 w-3 ml-1" />
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Lesson List */}
         <Card>
           <CardHeader>
@@ -426,7 +498,7 @@ export default function Learn() {
               {(selectedCategory ? getLessonsByCategory(selectedCategory) : LESSONS).map((lesson) => {
                 const isComplete = completedLessons.includes(lesson.id);
                 const prereqsMet = arePrerequisitesMet(lesson.id, completedLessons);
-                const isLocked = !prereqsMet && lesson.prerequisites.length > 0;
+                const hasUnmetPrereqs = !prereqsMet && lesson.prerequisites.length > 0;
 
                 const diffBadge =
                   lesson.difficulty === "beginner" ? "bg-green-500/20 text-green-400" :
@@ -436,18 +508,12 @@ export default function Learn() {
                 return (
                   <div
                     key={lesson.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
-                      isLocked
-                        ? "opacity-50 cursor-not-allowed"
-                        : "cursor-pointer hover:bg-muted/50"
-                    }`}
-                    onClick={() => !isLocked && setSelectedLesson(lesson.id)}
+                    className="flex items-center gap-3 p-3 rounded-lg border transition-colors cursor-pointer hover:bg-muted/50"
+                    onClick={() => setSelectedLesson(lesson.id)}
                   >
                     {/* Status icon */}
                     {isComplete ? (
                       <CheckCircle2 className="h-5 w-5 text-green-400 shrink-0" />
-                    ) : isLocked ? (
-                      <Lock className="h-5 w-5 text-muted-foreground shrink-0" />
                     ) : (
                       <Circle className="h-5 w-5 text-muted-foreground shrink-0" />
                     )}
@@ -471,18 +537,17 @@ export default function Learn() {
                             {LESSON_CATEGORIES.find(c => c.id === lesson.category)?.label}
                           </span>
                         )}
-                        {isLocked && lesson.prerequisites.length > 0 && (
-                          <span className="text-xs text-yellow-400">
-                            Requires: {lesson.prerequisites.map(p => getLesson(p)?.title || p).join(", ")}
+                        {hasUnmetPrereqs && (
+                          <span className="text-xs text-muted-foreground/70">
+                            {" \u2022 "}
+                            Recommended first: {lesson.prerequisites.map(p => getLesson(p)?.title || p).join(", ")}
                           </span>
                         )}
                       </div>
                     </div>
 
                     {/* Arrow */}
-                    {!isLocked && (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                    )}
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                   </div>
                 );
               })}
