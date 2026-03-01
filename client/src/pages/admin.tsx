@@ -23,7 +23,10 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { Redirect } from "wouter";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, AreaChart, Area, Legend,
+} from "recharts";
 import {
   LayoutDashboard,
   Users,
@@ -45,8 +48,10 @@ import {
   Loader2,
   XCircle,
   Sparkles,
+  Bot,
 } from "lucide-react";
 import { useState } from "react";
+import { cn } from "@/lib/utils";
 
 const CHART_COLORS = ["#3b82f6", "#22c55e", "#f97316", "#ef4444", "#a855f7", "#eab308", "#06b6d4", "#ec4899", "#6366f1"];
 
@@ -248,6 +253,28 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
     enabled: canQuery,
   });
 
+  // Usage over time (30 days, stacked demo vs real)
+  const { data: usageOverTime } = useQuery({
+    queryKey: ["adminUsageOverTime"],
+    queryFn: async () => {
+      const res = await adminFetch("/api/admin/analytics/usage-over-time?days=30");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: canQuery,
+  });
+
+  // Task type distribution
+  const { data: taskTypes } = useQuery({
+    queryKey: ["adminTaskTypes"],
+    queryFn: async () => {
+      const res = await adminFetch("/api/admin/analytics/task-types");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: canQuery,
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -291,7 +318,8 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {/* Stat Cards — 6-card responsive grid */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               <StatCard
                 icon={<MessageSquare className="h-5 w-5" />}
                 title="Total Messages"
@@ -308,6 +336,12 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
                 value={overview?.activeUsers ?? 0}
               />
               <StatCard
+                icon={<Bot className="h-5 w-5" />}
+                title="Demo Users"
+                value={overview?.demoUsers ?? 0}
+                variant="info"
+              />
+              <StatCard
                 icon={<ShieldAlert className="h-5 w-5" />}
                 title="Security Halts"
                 value={overview?.securityHalts ?? 0}
@@ -320,6 +354,9 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
                 variant={overview?.providerErrors > 0 ? "destructive" : "default"}
               />
             </div>
+
+            {/* Usage Over Time — stacked area chart */}
+            <UsageOverTimeChart data={usageOverTime} />
 
             {/* Users Needing Attention */}
             <UsersNeedingAttention users={users} />
@@ -368,8 +405,11 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
               </CardContent>
             </Card>
 
-            {/* Cost Analysis */}
+            {/* Cost Analysis (enhanced with demo/real split) */}
             <CostAnalysis users={users} overview={overview} modelUsage={modelUsage} />
+
+            {/* Task Type Distribution */}
+            <TaskTypeDistribution data={taskTypes} />
 
             {/* Model Performance */}
             <ModelPerformance modelUsage={modelUsage} />
@@ -893,18 +933,27 @@ function CostAnalysis({
   modelUsage: any[] | undefined;
 }) {
   const totalCost = overview?.totalCost ?? 0;
+  const realCost = overview?.realCost ?? 0;
+  const demoCost = overview?.demoCost ?? 0;
   const totalMessages = overview?.totalMessages ?? 0;
   const avgCostPerMessage = totalMessages > 0 ? totalCost / totalMessages : 0;
 
-  // Estimate monthly cost based on current usage (assume 30-day month)
-  const daysActive = overview?.daysActive ?? 1;
-  const projectedMonthlyCost = (totalCost / Math.max(daysActive, 1)) * 30;
-
-  // Per-user cost breakdown
-  const userCosts = (users || [])
-    .filter((u: any) => u.totalMessages > 0)
+  // Split users into active vs demo for the per-user breakdown
+  const activeUserCosts = (users || [])
+    .filter((u: any) => u.totalMessages > 0 && !u.email?.endsWith("@demo.local"))
     .map((u: any) => ({
       name: u.name || u.email?.split("@")[0] || "Unknown",
+      email: u.email,
+      messages: u.totalMessages,
+      estimatedCost: u.totalMessages * avgCostPerMessage,
+    }))
+    .sort((a: any, b: any) => b.estimatedCost - a.estimatedCost);
+
+  const demoUserCosts = (users || [])
+    .filter((u: any) => u.totalMessages > 0 && u.email?.endsWith("@demo.local"))
+    .map((u: any) => ({
+      name: u.name || u.email?.split("@")[0] || "Unknown",
+      email: u.email,
       messages: u.totalMessages,
       estimatedCost: u.totalMessages * avgCostPerMessage,
     }))
@@ -919,26 +968,35 @@ function CostAnalysis({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div className="p-4 bg-muted/30 rounded-lg text-center">
             <p className="text-2xl font-bold">${totalCost.toFixed(4)}</p>
             <p className="text-xs text-muted-foreground">Total Spend</p>
+          </div>
+          <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-lg text-center">
+            <p className="text-2xl font-bold text-blue-500">${realCost.toFixed(4)}</p>
+            <p className="text-xs text-muted-foreground">Active User Spend</p>
+          </div>
+          <div className="p-4 bg-orange-500/5 border border-orange-500/20 rounded-lg text-center">
+            <p className="text-2xl font-bold text-orange-500">${demoCost.toFixed(4)}</p>
+            <p className="text-xs text-muted-foreground">Demo User Spend</p>
           </div>
           <div className="p-4 bg-muted/30 rounded-lg text-center">
             <p className="text-2xl font-bold">${avgCostPerMessage.toFixed(6)}</p>
             <p className="text-xs text-muted-foreground">Avg Cost/Message</p>
           </div>
-          <div className="p-4 bg-muted/30 rounded-lg text-center">
-            <p className="text-2xl font-bold">${projectedMonthlyCost.toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground">Projected Monthly</p>
-          </div>
         </div>
 
-        {userCosts.length > 0 && (
-          <div>
-            <p className="text-sm font-medium mb-2">Cost by User (estimated)</p>
-            <div className="space-y-2">
-              {userCosts.slice(0, 5).map((u: any, i: number) => (
+        {/* Active Users cost breakdown */}
+        {activeUserCosts.length > 0 && (
+          <div className="mb-4">
+            <p className="text-sm font-medium mb-2 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-blue-500" />
+              Active Users
+            </p>
+            <div className="space-y-2 pl-4 border-l-2 border-blue-500/30">
+              {activeUserCosts.slice(0, 5).map((u: any, i: number) => (
                 <div key={i} className="flex items-center justify-between text-sm">
                   <span>{u.name}</span>
                   <div className="flex items-center gap-4">
@@ -950,6 +1008,178 @@ function CostAnalysis({
             </div>
           </div>
         )}
+
+        {/* Demo Users cost breakdown */}
+        {demoUserCosts.length > 0 && (
+          <div>
+            <p className="text-sm font-medium mb-2 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-orange-500" />
+              Demo Users
+            </p>
+            <div className="space-y-2 pl-4 border-l-2 border-orange-500/30">
+              {demoUserCosts.slice(0, 5).map((u: any, i: number) => (
+                <div key={i} className="flex items-center justify-between text-sm">
+                  <span>{u.name}</span>
+                  <div className="flex items-center gap-4">
+                    <span className="text-xs text-muted-foreground">{u.messages} msgs</span>
+                    <span className="font-medium">${u.estimatedCost.toFixed(4)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Stacked area chart showing daily message volume over the last 30 days,
+ * color-coded by active (blue) vs demo (orange) users.
+ */
+function UsageOverTimeChart({ data }: { data: any[] | undefined }) {
+  if (!data || data.length === 0) return null;
+
+  // Check if there's any data at all
+  const hasData = data.some(d => d.realMessages > 0 || d.demoMessages > 0);
+  if (!hasData) return null;
+
+  // Format dates for display: "Mar 1"
+  const chartData = data.map(d => ({
+    ...d,
+    label: new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+  }));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <TrendingUp className="h-5 w-5 text-primary" />
+          Usage Over Time
+        </CardTitle>
+        <CardDescription>
+          Daily message volume over the last 30 days
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={300}>
+          <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+            <defs>
+              <linearGradient id="colorReal" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="colorDemo" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 10 }}
+              interval={Math.floor(chartData.length / 8)}
+            />
+            <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+            <Tooltip
+              contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+              labelStyle={{ fontWeight: 600 }}
+            />
+            <Legend />
+            <Area
+              type="monotone"
+              dataKey="realMessages"
+              name="Active Users"
+              stackId="1"
+              stroke="#3b82f6"
+              fill="url(#colorReal)"
+              strokeWidth={2}
+            />
+            <Area
+              type="monotone"
+              dataKey="demoMessages"
+              name="Demo Users"
+              stackId="1"
+              stroke="#f97316"
+              fill="url(#colorDemo)"
+              strokeWidth={2}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Pie chart showing the distribution of task types (coding, research, creative, etc.)
+ */
+function TaskTypeDistribution({ data }: { data: any[] | undefined }) {
+  if (!data || data.length === 0) return null;
+
+  // Capitalize task type labels
+  const chartData = data.map(d => ({
+    ...d,
+    label: d.taskType.charAt(0).toUpperCase() + d.taskType.slice(1),
+  }));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <BarChart3 className="h-5 w-5 text-primary" />
+          Task Type Distribution
+        </CardTitle>
+        <CardDescription>
+          How users are using AI across different task categories
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <ResponsiveContainer width="100%" height={280}>
+            <PieChart>
+              <Pie
+                data={chartData}
+                dataKey="count"
+                nameKey="label"
+                cx="50%"
+                cy="50%"
+                outerRadius={100}
+                label={({ label, count }) => `${label}: ${count}`}
+              >
+                {chartData.map((_: any, i: number) => (
+                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
+
+          {/* Stats table alongside the chart */}
+          <div className="space-y-2">
+            <p className="text-sm font-medium mb-3">Breakdown</p>
+            {chartData.map((d: any, i: number) => {
+              const total = chartData.reduce((sum: number, t: any) => sum + t.count, 0);
+              const pct = total > 0 ? ((d.count / total) * 100).toFixed(1) : "0";
+              return (
+                <div key={d.taskType} className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                    />
+                    <span>{d.label}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">{pct}%</span>
+                    <span className="font-medium w-8 text-right">{d.count}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -1047,17 +1277,29 @@ function StatCard({
   icon: React.ReactNode;
   title: string;
   value: string | number;
-  variant?: "default" | "destructive";
+  variant?: "default" | "destructive" | "info";
 }) {
+  const iconColor = variant === "destructive"
+    ? "text-destructive"
+    : variant === "info"
+      ? "text-orange-500"
+      : "text-primary";
+
+  const valueColor = variant === "destructive"
+    ? "text-destructive"
+    : variant === "info"
+      ? "text-orange-500"
+      : "";
+
   return (
     <Card>
       <CardContent className="pt-6">
         <div className="flex items-center justify-between">
-          <div className={variant === "destructive" ? "text-destructive" : "text-primary"}>
+          <div className={iconColor}>
             {icon}
           </div>
           <div className="text-right">
-            <p className="text-2xl font-bold">{value}</p>
+            <p className={cn("text-2xl font-bold", valueColor)}>{value}</p>
             <p className="text-xs text-muted-foreground">{title}</p>
           </div>
         </div>

@@ -889,6 +889,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /** Usage over time — daily message counts split by demo vs real users */
+  app.get("/api/admin/analytics/usage-over-time", requireAdmin, async (req, res) => {
+    try {
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
+      if (!orgId) return res.status(401).json({ error: "Not authenticated" });
+
+      const days = Math.min(Number(req.query.days) || 30, 90);
+      const data = await storage.getUsageOverTime(orgId, days);
+      res.json(data);
+    } catch (error: any) {
+      console.error("Admin usage over time error:", error);
+      res.status(500).json({ error: "Failed to get usage data" });
+    }
+  });
+
+  /** Task type distribution across all org users */
+  app.get("/api/admin/analytics/task-types", requireAdmin, async (req, res) => {
+    try {
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
+      if (!orgId) return res.status(401).json({ error: "Not authenticated" });
+
+      const data = await storage.getTaskTypeDistribution(orgId);
+      res.json(data);
+    } catch (error: any) {
+      console.error("Admin task types error:", error);
+      res.status(500).json({ error: "Failed to get task type distribution" });
+    }
+  });
+
   // List org users
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     try {

@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, gte, count, sum, avg } from "drizzle-orm";
+import { eq, and, desc, sql, gte, count, sum, avg, inArray } from "drizzle-orm";
 import { getDb, isDatabaseAvailable } from "./db";
 import {
   organizations,
@@ -123,6 +123,9 @@ export interface IStorage {
     totalMessages: number;
     totalCost: number;
     activeUsers: number;
+    demoUsers: number;
+    realCost: number;
+    demoCost: number;
     securityHalts: number;
     providerErrors: number;
   }>;
@@ -139,6 +142,18 @@ export interface IStorage {
     count: number;
     totalCost: number;
     avgResponseTimeMs: number;
+  }>>;
+  getUsageOverTime(orgId: string, days?: number): Promise<Array<{
+    date: string;
+    realMessages: number;
+    demoMessages: number;
+    realCost: number;
+    demoCost: number;
+  }>>;
+  getTaskTypeDistribution(orgId: string): Promise<Array<{
+    taskType: string;
+    count: number;
+    avgCost: number;
   }>>;
 }
 
@@ -612,22 +627,31 @@ export class DatabaseStorage implements IStorage {
     totalMessages: number;
     totalCost: number;
     activeUsers: number;
+    demoUsers: number;
+    realCost: number;
+    demoCost: number;
     securityHalts: number;
     providerErrors: number;
   }> {
-    // Get org user IDs
+    // Get org users with email for demo/real classification
     const orgUsers = await this.db
-      .select({ id: users.id })
+      .select({ id: users.id, email: users.email })
       .from(users)
       .where(eq(users.orgId, orgId));
 
     if (orgUsers.length === 0) {
-      return { totalMessages: 0, totalCost: 0, activeUsers: 0, securityHalts: 0, providerErrors: 0 };
+      return {
+        totalMessages: 0, totalCost: 0, activeUsers: 0, demoUsers: 0,
+        realCost: 0, demoCost: 0, securityHalts: 0, providerErrors: 0,
+      };
     }
 
-    const userIds = orgUsers.map(u => u.id);
+    // Split users into demo vs real
+    const demoUserIds = orgUsers.filter(u => u.email?.endsWith("@demo.local")).map(u => u.id);
+    const realUserIds = orgUsers.filter(u => !u.email?.endsWith("@demo.local")).map(u => u.id);
+    const allUserIds = orgUsers.map(u => u.id);
 
-    // Aggregate from analysis_logs for these users
+    // Aggregate from analysis_logs for all org users
     const [stats] = await this.db
       .select({
         totalMessages: count(analysisLogs.id),
@@ -640,24 +664,62 @@ export class DatabaseStorage implements IStorage {
         ),
       })
       .from(analysisLogs)
-      .where(sql`${analysisLogs.userId} = ANY(${userIds})`);
+      .where(inArray(analysisLogs.userId, allUserIds));
 
-    // Count users active in last 30 days
+    // Get cost breakdown by demo vs real (only if both groups exist)
+    let demoCost = 0;
+    let realCost = 0;
+
+    if (demoUserIds.length > 0) {
+      const [demoCostResult] = await this.db
+        .select({ cost: sum(analysisLogs.estimatedCost) })
+        .from(analysisLogs)
+        .where(inArray(analysisLogs.userId, demoUserIds));
+      demoCost = Number(demoCostResult?.cost ?? 0);
+    }
+
+    if (realUserIds.length > 0) {
+      const [realCostResult] = await this.db
+        .select({ cost: sum(analysisLogs.estimatedCost) })
+        .from(analysisLogs)
+        .where(inArray(analysisLogs.userId, realUserIds));
+      realCost = Number(realCostResult?.cost ?? 0);
+    }
+
+    // Count users active in last 30 days (split by demo/real)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const [activeResult] = await this.db
       .select({ activeUsers: count(userProgress.id) })
       .from(userProgress)
       .where(
         and(
-          sql`${userProgress.userId} = ANY(${userIds})`,
+          inArray(userProgress.userId, realUserIds.length > 0 ? realUserIds : allUserIds),
           gte(userProgress.lastActiveAt, thirtyDaysAgo)
         )
       );
+
+    // Count demo users active in last 30 days
+    let demoActiveCount = 0;
+    if (demoUserIds.length > 0) {
+      const [demoActiveResult] = await this.db
+        .select({ activeUsers: count(userProgress.id) })
+        .from(userProgress)
+        .where(
+          and(
+            inArray(userProgress.userId, demoUserIds),
+            gte(userProgress.lastActiveAt, thirtyDaysAgo)
+          )
+        );
+      demoActiveCount = Number(demoActiveResult?.activeUsers ?? 0);
+    }
 
     return {
       totalMessages: Number(stats?.totalMessages ?? 0),
       totalCost: Number(stats?.totalCost ?? 0),
       activeUsers: Number(activeResult?.activeUsers ?? 0),
+      demoUsers: demoActiveCount,
+      realCost,
+      demoCost,
       securityHalts: Number(stats?.securityHalts ?? 0),
       providerErrors: Number(stats?.providerErrors ?? 0),
     };
@@ -688,7 +750,7 @@ export class DatabaseStorage implements IStorage {
       .from(analysisLogs)
       .where(
         and(
-          sql`${analysisLogs.userId} = ANY(${userIds})`,
+          inArray(analysisLogs.userId, userIds),
           sql`${analysisLogs.parameters}::jsonb ? 'providerFailures'`
         )
       )
@@ -746,7 +808,7 @@ export class DatabaseStorage implements IStorage {
         avgResponseTimeMs: avg(analysisLogs.responseTimeMs),
       })
       .from(analysisLogs)
-      .where(sql`${analysisLogs.userId} = ANY(${userIds})`)
+      .where(inArray(analysisLogs.userId, userIds))
       .groupBy(analysisLogs.selectedModel, analysisLogs.modelProvider);
 
     return results.map(r => ({
@@ -756,6 +818,118 @@ export class DatabaseStorage implements IStorage {
       totalCost: Number(r.totalCost ?? 0),
       avgResponseTimeMs: Math.round(Number(r.avgResponseTimeMs ?? 0)),
     }));
+  }
+
+  /**
+   * Get daily usage data for the last N days, split by demo vs real users.
+   * Returns a date-ordered array with message counts and cost per day.
+   */
+  async getUsageOverTime(orgId: string, days: number = 30): Promise<Array<{
+    date: string;
+    realMessages: number;
+    demoMessages: number;
+    realCost: number;
+    demoCost: number;
+  }>> {
+    const orgUsers = await this.db
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(eq(users.orgId, orgId));
+
+    if (orgUsers.length === 0) return [];
+
+    const demoUserIds = orgUsers.filter(u => u.email?.endsWith("@demo.local")).map(u => u.id);
+    const realUserIds = orgUsers.filter(u => !u.email?.endsWith("@demo.local")).map(u => u.id);
+    const allUserIds = orgUsers.map(u => u.id);
+
+    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Query daily aggregates with CASE expressions for demo/real split
+    const rows = await this.db
+      .select({
+        date: sql<string>`DATE(${analysisLogs.createdAt})`.as("date"),
+        realMessages: count(
+          sql`CASE WHEN ${analysisLogs.userId} NOT IN (${demoUserIds.length > 0 ? sql.join(demoUserIds.map(id => sql`${id}`), sql`,`) : sql`''`}) THEN 1 END`
+        ),
+        demoMessages: count(
+          sql`CASE WHEN ${analysisLogs.userId} IN (${demoUserIds.length > 0 ? sql.join(demoUserIds.map(id => sql`${id}`), sql`,`) : sql`''`}) THEN 1 END`
+        ),
+        realCost: sql<string>`COALESCE(SUM(CASE WHEN ${analysisLogs.userId} NOT IN (${demoUserIds.length > 0 ? sql.join(demoUserIds.map(id => sql`${id}`), sql`,`) : sql`''`}) THEN ${analysisLogs.estimatedCost} ELSE 0 END), 0)`,
+        demoCost: sql<string>`COALESCE(SUM(CASE WHEN ${analysisLogs.userId} IN (${demoUserIds.length > 0 ? sql.join(demoUserIds.map(id => sql`${id}`), sql`,`) : sql`''`}) THEN ${analysisLogs.estimatedCost} ELSE 0 END), 0)`,
+      })
+      .from(analysisLogs)
+      .where(
+        and(
+          inArray(analysisLogs.userId, allUserIds),
+          gte(analysisLogs.createdAt, startDate)
+        )
+      )
+      .groupBy(sql`DATE(${analysisLogs.createdAt})`)
+      .orderBy(sql`DATE(${analysisLogs.createdAt})`);
+
+    // Build a complete date series (fill gaps with zeros)
+    const dataMap = new Map<string, { realMessages: number; demoMessages: number; realCost: number; demoCost: number }>();
+    for (const row of rows) {
+      dataMap.set(String(row.date), {
+        realMessages: Number(row.realMessages),
+        demoMessages: Number(row.demoMessages),
+        realCost: Number(row.realCost),
+        demoCost: Number(row.demoCost),
+      });
+    }
+
+    const result: Array<{ date: string; realMessages: number; demoMessages: number; realCost: number; demoCost: number }> = [];
+    for (let i = 0; i < days; i++) {
+      const d = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
+      const dateStr = d.toISOString().split("T")[0];
+      const entry = dataMap.get(dateStr);
+      result.push({
+        date: dateStr,
+        realMessages: entry?.realMessages ?? 0,
+        demoMessages: entry?.demoMessages ?? 0,
+        realCost: entry?.realCost ?? 0,
+        demoCost: entry?.demoCost ?? 0,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Get task type distribution across all org users.
+   * Returns aggregated count and average cost per task type.
+   */
+  async getTaskTypeDistribution(orgId: string): Promise<Array<{
+    taskType: string;
+    count: number;
+    avgCost: number;
+  }>> {
+    const orgUsers = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.orgId, orgId));
+
+    if (orgUsers.length === 0) return [];
+
+    const userIds = orgUsers.map(u => u.id);
+
+    const results = await this.db
+      .select({
+        taskType: analysisLogs.taskType,
+        count: count(analysisLogs.id),
+        avgCost: avg(analysisLogs.estimatedCost),
+      })
+      .from(analysisLogs)
+      .where(inArray(analysisLogs.userId, userIds))
+      .groupBy(analysisLogs.taskType);
+
+    return results
+      .filter(r => r.taskType) // Exclude null task types
+      .map(r => ({
+        taskType: r.taskType ?? "unknown",
+        count: Number(r.count),
+        avgCost: Number(r.avgCost ?? 0),
+      }));
   }
 }
 
