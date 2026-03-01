@@ -1295,6 +1295,95 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
+   * Create a new prompt template or AI assistant preset.
+   * Sets isGlobal=true so it appears in the shared library.
+   */
+  app.post("/api/prompt-templates", async (req, res) => {
+    try {
+      const {
+        title, description, category, promptText,
+        systemPrompt, isPreset, icon, tags, starterMessage,
+      } = req.body;
+
+      if (!title || !description || !category || !promptText) {
+        return res.status(400).json({
+          error: "Missing required fields: title, description, category, promptText",
+        });
+      }
+
+      const template = await storage.createPromptTemplate({
+        title,
+        description,
+        category,
+        promptText,
+        systemPrompt: systemPrompt || null,
+        isPreset: isPreset || false,
+        icon: icon || null,
+        tags: tags || [],
+        starterMessage: starterMessage || null,
+        isGlobal: true,
+      });
+
+      res.status(201).json(template);
+    } catch (error: any) {
+      console.error("Create prompt template error:", error);
+      res.status(500).json({ error: "Failed to create prompt template" });
+    }
+  });
+
+  /**
+   * Update an existing prompt template or AI assistant preset.
+   */
+  app.put("/api/prompt-templates/:id", async (req, res) => {
+    try {
+      const existing = await storage.getPromptTemplate(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      const {
+        title, description, category, promptText,
+        systemPrompt, isPreset, icon, tags, starterMessage,
+      } = req.body;
+
+      const template = await storage.updatePromptTemplate(req.params.id, {
+        ...(title !== undefined && { title }),
+        ...(description !== undefined && { description }),
+        ...(category !== undefined && { category }),
+        ...(promptText !== undefined && { promptText }),
+        ...(systemPrompt !== undefined && { systemPrompt }),
+        ...(isPreset !== undefined && { isPreset }),
+        ...(icon !== undefined && { icon }),
+        ...(tags !== undefined && { tags }),
+        ...(starterMessage !== undefined && { starterMessage }),
+      });
+
+      res.json(template);
+    } catch (error: any) {
+      console.error("Update prompt template error:", error);
+      res.status(500).json({ error: "Failed to update prompt template" });
+    }
+  });
+
+  /**
+   * Delete a prompt template or AI assistant preset.
+   */
+  app.delete("/api/prompt-templates/:id", async (req, res) => {
+    try {
+      const existing = await storage.getPromptTemplate(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      await storage.deletePromptTemplate(req.params.id);
+      res.status(204).end();
+    } catch (error: any) {
+      console.error("Delete prompt template error:", error);
+      res.status(500).json({ error: "Failed to delete prompt template" });
+    }
+  });
+
+  /**
    * "Use" a prompt template — increments usage count and returns the
    * full template (including promptText and systemPrompt for presets).
    */

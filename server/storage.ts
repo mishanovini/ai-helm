@@ -114,6 +114,8 @@ export interface IStorage {
   listPromptTemplates(filters?: { category?: string; search?: string; isPreset?: boolean }, limit?: number): Promise<PromptTemplate[]>;
   getPopularPromptTemplates(limit?: number): Promise<PromptTemplate[]>;
   createPromptTemplate(template: InsertPromptTemplate): Promise<PromptTemplate>;
+  updatePromptTemplate(id: string, data: Partial<InsertPromptTemplate>): Promise<PromptTemplate | undefined>;
+  deletePromptTemplate(id: string): Promise<void>;
   incrementTemplateUsage(id: string): Promise<PromptTemplate | undefined>;
 
   // Analytics (aggregated queries for admin)
@@ -574,6 +576,22 @@ export class DatabaseStorage implements IStorage {
   async createPromptTemplate(template: InsertPromptTemplate): Promise<PromptTemplate> {
     const [created] = await this.db.insert(promptTemplates).values(template as any).returning();
     return created;
+  }
+
+  async updatePromptTemplate(
+    id: string,
+    data: Partial<InsertPromptTemplate>
+  ): Promise<PromptTemplate | undefined> {
+    const [updated] = await this.db
+      .update(promptTemplates)
+      .set({ ...data, updatedAt: new Date() } as any)
+      .where(eq(promptTemplates.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deletePromptTemplate(id: string): Promise<void> {
+    await this.db.delete(promptTemplates).where(eq(promptTemplates.id, id));
   }
 
   async incrementTemplateUsage(id: string): Promise<PromptTemplate | undefined> {
