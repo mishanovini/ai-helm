@@ -4,14 +4,17 @@
  * Displays real-time analysis results in a narrow side panel, ordered by
  * relevance to the user. Designed for AI beginners:
  *
- * 1. Model + Cost (always open, with routing reasoning)
- * 2. Prompt Quality + Suggestions (always open)
- * 3. Optimized Prompt (always visible, prominent)
- * 4. Security (compact always-visible indicator, expandable when flagged)
- * 5. Parameters (collapsed with value preview, expandable with reasoning)
- * 6. Intent + Sentiment + Style (collapsed badge strip, expandable)
+ * 1. Security Halt Alert (when blocked — top priority)
+ * 2. Model + Cost (always open, with routing reasoning)
+ * 3. Prompt Quality + Suggestions (always open)
+ * 4. Optimized Prompt (always visible, prominent)
+ * 5. Security (compact always-visible indicator, expandable when flagged)
+ * 6. Parameters (collapsed with value preview, expandable with reasoning)
+ * 7. Intent + Sentiment + Style (collapsed badge strip, expandable)
  *
- * Collapsed sections always show summary information — never just a blank header.
+ * When a request is security-halted, downstream sections (Model, Optimized
+ * Prompt) show a "blocked" state instead of a perpetual loading spinner.
+ * The halt alert includes educational context and links to relevant lessons.
  */
 
 import { useState } from "react";
@@ -24,12 +27,15 @@ import {
   Brain,
   Shield,
   ShieldAlert,
+  ShieldBan,
   Sparkles,
   Settings,
   Code,
   Lightbulb,
   ChevronDown,
   Tags,
+  BookOpen,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -125,6 +131,118 @@ function getParameterExplanation(params: Record<string, number | string>): strin
 }
 
 // ---------------------------------------------------------------------------
+// Security risk categorization and lesson mapping
+// ---------------------------------------------------------------------------
+
+interface SecurityRiskInfo {
+  /** Human-readable category name */
+  category: string;
+  /** Brief explanation of what this risk means */
+  explanation: string;
+  /** Relevant lesson ID from the curriculum */
+  lessonId: string;
+  /** Lesson title for the link */
+  lessonTitle: string;
+}
+
+/**
+ * Analyze the security explanation to determine the risk category and
+ * return educational context with a link to the most relevant lesson.
+ */
+function getSecurityRiskInfo(explanation: string | undefined, score: number): SecurityRiskInfo {
+  const lower = (explanation || "").toLowerCase();
+
+  // Prompt injection / instruction override
+  if (
+    lower.includes("instruction") ||
+    lower.includes("override") ||
+    lower.includes("bypass") ||
+    lower.includes("jailbreak") ||
+    lower.includes("system prompt") ||
+    lower.includes("critical threat")
+  ) {
+    return {
+      category: "Prompt Injection",
+      explanation:
+        "This message attempted to override or bypass the AI system's instructions. " +
+        "Prompt injection is a technique where input tries to manipulate the AI into " +
+        "ignoring its guidelines or revealing confidential information.",
+      lessonId: "sa-01-prompt-injection",
+      lessonTitle: "Understanding Prompt Injection",
+    };
+  }
+
+  // Exploitation / hacking learning
+  if (
+    lower.includes("exploit") ||
+    lower.includes("hack") ||
+    lower.includes("attack") ||
+    lower.includes("adversarial") ||
+    lower.includes("technique")
+  ) {
+    return {
+      category: "Exploitation Attempt",
+      explanation:
+        "This message appeared to seek information about attacking or exploiting AI systems. " +
+        "Learning to exploit AI security can enable harmful activities and is flagged " +
+        "as a security risk.",
+      lessonId: "sa-01-prompt-injection",
+      lessonTitle: "Understanding Prompt Injection",
+    };
+  }
+
+  // Social engineering
+  if (
+    lower.includes("social engineering") ||
+    lower.includes("impersonat") ||
+    lower.includes("authority") ||
+    lower.includes("urgency") ||
+    lower.includes("phishing")
+  ) {
+    return {
+      category: "Social Engineering",
+      explanation:
+        "This message contained patterns commonly associated with social engineering — " +
+        "such as impersonating authority figures, creating false urgency, or requesting " +
+        "sensitive information under a pretext.",
+      lessonId: "sa-01-prompt-injection",
+      lessonTitle: "Understanding Prompt Injection",
+    };
+  }
+
+  // Sensitive data
+  if (
+    lower.includes("sensitive") ||
+    lower.includes("credential") ||
+    lower.includes("password") ||
+    lower.includes("api key") ||
+    lower.includes("credit card") ||
+    lower.includes("personal data") ||
+    lower.includes("data")
+  ) {
+    return {
+      category: "Sensitive Data Risk",
+      explanation:
+        "This message contained or requested sensitive information such as credentials, " +
+        "financial data, or personal identifiers. Sharing this type of data with AI " +
+        "systems can lead to data exposure.",
+      lessonId: "sa-02-data-safety",
+      lessonTitle: "Protecting Sensitive Data",
+    };
+  }
+
+  // Default / generic high risk
+  return {
+    category: score >= 8 ? "Critical Security Threat" : "Security Concern",
+    explanation:
+      "This message was flagged by AI Helm's security analysis as potentially harmful or risky. " +
+      "The security system evaluates prompts for patterns that could compromise safety.",
+    lessonId: "sa-01-prompt-injection",
+    lessonTitle: "Understanding Prompt Injection",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -135,6 +253,11 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
 
   // Auto-expand security when score is concerning
   const shouldExpandSecurity = data !== null && data.securityScore > 3;
+
+  // Determine risk info for educational content when halted
+  const riskInfo = data?.securityHalted
+    ? getSecurityRiskInfo(data.securityExplanation, data.securityScore)
+    : null;
 
   return (
     <div className="space-y-3">
@@ -154,18 +277,39 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
           {/* ============================================================= */}
           {/* SECURITY HALT — top priority when triggered                    */}
           {/* ============================================================= */}
-          {data.securityHalted && (
+          {data.securityHalted && riskInfo && (
             <Alert variant="destructive" data-testid="alert-security-halt">
               <ShieldAlert className="h-4 w-4" />
-              <AlertTitle>Request Blocked</AlertTitle>
-              <AlertDescription className="mt-1 space-y-1">
+              <AlertTitle className="flex items-center gap-2">
+                Request Blocked
+              </AlertTitle>
+              <AlertDescription className="mt-1 space-y-2.5">
                 <p>
                   Security score <strong>{data.securityScore}/10</strong> exceeds
                   threshold {data.securityThreshold ?? 8}.
                 </p>
-                {data.securityExplanation && (
-                  <p className="text-xs opacity-80">{data.securityExplanation}</p>
-                )}
+
+                {/* Risk category badge */}
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="outline" className="text-[10px] bg-destructive/10 border-destructive/30">
+                    {riskInfo.category}
+                  </Badge>
+                </div>
+
+                {/* Educational explanation */}
+                <p className="text-xs leading-relaxed opacity-90">
+                  {riskInfo.explanation}
+                </p>
+
+                {/* Link to relevant lesson */}
+                <a
+                  href={`/learn?lesson=${riskInfo.lessonId}`}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-destructive-foreground hover:underline underline-offset-2 mt-1"
+                >
+                  <BookOpen className="h-3 w-3" />
+                  Learn more: {riskInfo.lessonTitle}
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
               </AlertDescription>
             </Alert>
           )}
@@ -179,7 +323,12 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
               Model & Cost
             </label>
             <div className="mt-1.5 space-y-1.5">
-              {data.selectedModel ? (
+              {data.securityHalted ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <ShieldBan className="h-3.5 w-3.5 text-destructive shrink-0" />
+                  <span>Skipped — request blocked by security policy</span>
+                </div>
+              ) : data.selectedModel ? (
                 <>
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge className="bg-chart-4/20 text-chart-4" data-testid="badge-model">
@@ -267,7 +416,14 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 <Lightbulb className="h-3 w-3" />
                 Prompt Quality
               </label>
-              <span className="text-xs text-muted-foreground animate-pulse mt-1 block">Analyzing...</span>
+              {data.securityHalted ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                  <ShieldBan className="h-3.5 w-3.5 text-destructive shrink-0" />
+                  <span>Skipped — request blocked</span>
+                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground animate-pulse mt-1 block">Analyzing...</span>
+              )}
             </Card>
           )}
 
@@ -279,7 +435,12 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
               <Code className="h-3 w-3" />
               Optimized Prompt
             </label>
-            {data.optimizedPrompt ? (
+            {data.securityHalted ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <ShieldBan className="h-3.5 w-3.5 text-destructive shrink-0" />
+                <span>Skipped — request blocked by security policy</span>
+              </div>
+            ) : data.optimizedPrompt ? (
               <ScrollArea className="max-h-32">
                 <pre className="text-[11px] font-mono bg-muted/50 p-2 rounded border whitespace-pre-wrap break-words leading-relaxed" data-testid="text-optimized-prompt">
                   {data.optimizedPrompt}
@@ -338,7 +499,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
           {/* ============================================================= */}
           {/* 5. PARAMETERS — collapsed with value preview                   */}
           {/* ============================================================= */}
-          {data.parameters && Object.keys(data.parameters).length > 0 && (
+          {!data.securityHalted && data.parameters && Object.keys(data.parameters).length > 0 && (
             <Collapsible open={parametersOpen} onOpenChange={setParametersOpen}>
               <CollapsibleTrigger asChild>
                 <button className="w-full flex items-center justify-between px-3 py-2 rounded-md border bg-card hover:bg-accent/30 transition-colors">

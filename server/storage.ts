@@ -631,7 +631,7 @@ export class DatabaseStorage implements IStorage {
     const [stats] = await this.db
       .select({
         totalMessages: count(analysisLogs.id),
-        totalCost: sum(analysisLogs.actualCost),
+        totalCost: sum(analysisLogs.estimatedCost),
         securityHalts: count(
           sql`CASE WHEN ${analysisLogs.securityHalted} = true THEN 1 END`
         ),
@@ -742,7 +742,7 @@ export class DatabaseStorage implements IStorage {
         model: analysisLogs.selectedModel,
         provider: analysisLogs.modelProvider,
         count: count(analysisLogs.id),
-        totalCost: sum(analysisLogs.actualCost),
+        totalCost: sum(analysisLogs.estimatedCost),
         avgResponseTimeMs: avg(analysisLogs.responseTimeMs),
       })
       .from(analysisLogs)

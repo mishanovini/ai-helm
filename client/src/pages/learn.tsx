@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -281,6 +281,17 @@ function LessonView({
 export default function Learn() {
   const [selectedLesson, setSelectedLesson] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<LessonCategory | null>(null);
+
+  // Support deep-linking via ?lesson=sa-01-prompt-injection query parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const lessonParam = params.get("lesson");
+    if (lessonParam && getLesson(lessonParam)) {
+      setSelectedLesson(lessonParam);
+      // Clean up the URL without triggering a navigation
+      window.history.replaceState({}, "", "/learn");
+    }
+  }, []);
 
   // In a real app, this would be fetched from the server via user progress
   // For now, use localStorage for persistence
