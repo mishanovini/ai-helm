@@ -266,6 +266,20 @@ export async function runAnalysisJob(
         }
       }
 
+      // Set conversation title even for blocked requests so they don't appear
+      // as "New conversation" in the sidebar history
+      if (job.conversationId) {
+        try {
+          const conv = await storage.getConversation(job.conversationId);
+          if (conv && !conv.title) {
+            const title = analysis.conversationTitle || analysis.intent.substring(0, 40);
+            await storage.updateConversationTitle(job.conversationId, title);
+          }
+        } catch {
+          // Non-critical: title-setting failure doesn't block the pipeline
+        }
+      }
+
       sendUpdate("complete", "error", undefined,
         `Request blocked: security score ${analysis.securityScore}/10 exceeds threshold ${securityThreshold}. Contact your admin if you believe this is an error.`
       );
