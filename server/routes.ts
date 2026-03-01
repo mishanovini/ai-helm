@@ -918,6 +918,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /** Average phase timings from recent analysis logs */
+  app.get("/api/admin/analytics/phase-timings", requireAdmin, async (req, res) => {
+    try {
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
+      if (!orgId) return res.status(401).json({ error: "Not authenticated" });
+
+      const data = await storage.getAveragePhaseTimings(orgId);
+      res.json(data);
+    } catch (error: any) {
+      console.error("Admin phase timings error:", error);
+      res.status(500).json({ error: "Failed to get phase timings" });
+    }
+  });
+
   // List org users
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     try {
@@ -926,14 +940,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const orgUsers = await storage.listUsersByOrg(orgId);
 
-      // Enrich with progress data
+      // Get actual security halt counts from analysisLogs (not the stale userProgress field)
+      const userIds = orgUsers.map(u => u.id);
+      const securityHaltCounts = await storage.getSecurityHaltCountsByUser(userIds);
+
+      // Enrich with progress data + real security flag counts
       const enriched = await Promise.all(orgUsers.map(async (u) => {
         const progress = await storage.getUserProgress(u.id);
         return {
           ...u,
           totalMessages: progress?.totalMessages ?? 0,
           averagePromptQuality: progress?.averagePromptQuality ?? 0,
-          securityFlags: progress?.securityFlags ?? 0,
+          securityFlags: securityHaltCounts[u.id] ?? 0,
           lastActiveAt: progress?.lastActiveAt,
         };
       }));

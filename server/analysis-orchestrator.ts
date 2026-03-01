@@ -56,6 +56,10 @@ export async function runAnalysisJob(
   let hasError = false;
   const startTime = Date.now();
 
+  /** Per-phase timing tracker (persisted in analysisLogs.parameters) */
+  const phaseTimings: Record<string, number> = {};
+  let phaseStart = startTime;
+
   const sendUpdate = (phase: string, status: AnalysisUpdate["status"], payload?: any, error?: string) => {
     const update: AnalysisUpdate = { jobId, phase, status, payload, error };
     if (ws.readyState === WebSocket.OPEN) {
@@ -115,6 +119,9 @@ export async function runAnalysisJob(
         ? { ...msg, content: scan.redactedMessage }
         : msg;
     });
+
+    phaseTimings.dlpScanMs = Date.now() - phaseStart;
+    phaseStart = Date.now();
 
     // ========================================================================
     // Phase 0.5: Load custom task types from router config
@@ -209,6 +216,9 @@ export async function runAnalysisJob(
     // Store task type and complexity for model selection and logging
     results.taskType = analysis.taskType;
     results.complexity = analysis.complexity;
+
+    phaseTimings.analysisMs = Date.now() - phaseStart;
+    phaseStart = Date.now();
 
     // ========================================================================
     // Security Threshold Halt
@@ -330,6 +340,9 @@ export async function runAnalysisJob(
       return;
     }
 
+    phaseTimings.modelSelectionMs = Date.now() - phaseStart;
+    phaseStart = Date.now();
+
     // ========================================================================
     // Phase 3: Prompt Optimization
     // ========================================================================
@@ -353,6 +366,9 @@ export async function runAnalysisJob(
       sendUpdate("prompt", "completed", { optimizedPrompt: safeMessage, fallback: true });
     }
 
+    phaseTimings.promptOptMs = Date.now() - phaseStart;
+    phaseStart = Date.now();
+
     // ========================================================================
     // Phase 4: Parameter Tuning
     // ========================================================================
@@ -375,6 +391,9 @@ export async function runAnalysisJob(
       sendUpdate("parameters", "completed", { parameters: results.parameters, fallback: true });
     }
 
+    phaseTimings.paramTuningMs = Date.now() - phaseStart;
+    phaseStart = Date.now();
+
     // ========================================================================
     // Phase 4.5: Build System Context
     // ========================================================================
@@ -387,6 +406,9 @@ export async function runAnalysisJob(
     } catch {
       // Non-critical: proceed without system context
     }
+
+    phaseTimings.systemContextMs = Date.now() - phaseStart;
+    phaseStart = Date.now();
 
     // ========================================================================
     // Phase 5+6: Generate AI Response with Provider Failover + Validation Retry
@@ -599,6 +621,8 @@ export async function runAnalysisJob(
     // Analytics Logging (fire-and-forget)
     // ========================================================================
 
+    phaseTimings.generationMs = Date.now() - phaseStart;
+
     if (job.userId) {
       const responseTimeMs = Date.now() - startTime;
       try {
@@ -622,6 +646,7 @@ export async function runAnalysisJob(
           parameters: {
             ...results.parameters,
             ...(providerFailures.length > 0 ? { providerFailures } : {}),
+            phaseTimings,
           } as any,
           responseTimeMs,
         });

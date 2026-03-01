@@ -155,6 +155,11 @@ export interface IStorage {
     count: number;
     avgCost: number;
   }>>;
+  getSecurityHaltCountsByUser(userIds: string[]): Promise<Record<string, number>>;
+  getAveragePhaseTimings(orgId: string): Promise<Array<{
+    phase: string;
+    avgMs: number;
+  }>>;
 }
 
 // ============================================================================
@@ -930,6 +935,87 @@ export class DatabaseStorage implements IStorage {
         count: Number(r.count),
         avgCost: Number(r.avgCost ?? 0),
       }));
+  }
+
+  /**
+   * Count security-halted requests per user from analysisLogs.
+   * Returns a map of userId -> halt count (more accurate than userProgress.securityFlags).
+   */
+  async getSecurityHaltCountsByUser(userIds: string[]): Promise<Record<string, number>> {
+    if (userIds.length === 0) return {};
+
+    const results = await this.db
+      .select({
+        userId: analysisLogs.userId,
+        haltCount: count(analysisLogs.id),
+      })
+      .from(analysisLogs)
+      .where(
+        and(
+          inArray(analysisLogs.userId, userIds),
+          sql`${analysisLogs.securityHalted} = true`
+        )
+      )
+      .groupBy(analysisLogs.userId);
+
+    const map: Record<string, number> = {};
+    for (const r of results) {
+      if (r.userId) map[r.userId] = Number(r.haltCount);
+    }
+    return map;
+  }
+
+  /**
+   * Compute average phase timings across all org users' recent analysis logs.
+   * Extracts phaseTimings from the parameters jsonb field.
+   */
+  async getAveragePhaseTimings(orgId: string): Promise<Array<{
+    phase: string;
+    avgMs: number;
+  }>> {
+    const orgUsers = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.orgId, orgId));
+
+    if (orgUsers.length === 0) return [];
+
+    const userIds = orgUsers.map(u => u.id);
+
+    // Get recent logs that have phaseTimings in their parameters
+    const logs = await this.db
+      .select({ parameters: analysisLogs.parameters })
+      .from(analysisLogs)
+      .where(
+        and(
+          inArray(analysisLogs.userId, userIds),
+          sql`${analysisLogs.parameters}::jsonb ? 'phaseTimings'`
+        )
+      )
+      .orderBy(desc(analysisLogs.createdAt))
+      .limit(100);
+
+    // Aggregate phase timings
+    const totals: Record<string, { sum: number; count: number }> = {};
+    for (const log of logs) {
+      const params = log.parameters as any;
+      const timings = params?.phaseTimings;
+      if (!timings || typeof timings !== "object") continue;
+
+      for (const [phase, ms] of Object.entries(timings)) {
+        if (typeof ms !== "number") continue;
+        if (!totals[phase]) totals[phase] = { sum: 0, count: 0 };
+        totals[phase].sum += ms;
+        totals[phase].count += 1;
+      }
+    }
+
+    return Object.entries(totals)
+      .map(([phase, { sum, count }]) => ({
+        phase,
+        avgMs: Math.round(sum / count),
+      }))
+      .sort((a, b) => b.avgMs - a.avgMs);
   }
 }
 

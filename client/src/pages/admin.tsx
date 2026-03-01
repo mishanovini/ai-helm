@@ -275,6 +275,17 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
     enabled: canQuery,
   });
 
+  // Average phase timings
+  const { data: phaseTimings } = useQuery({
+    queryKey: ["adminPhaseTimings"],
+    queryFn: async () => {
+      const res = await adminFetch("/api/admin/analytics/phase-timings");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: canQuery,
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -361,24 +372,17 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
             {/* Users Needing Attention */}
             <UsersNeedingAttention users={users} />
 
-            {/* Model Usage Chart */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Model Usage Distribution</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {modelUsage && modelUsage.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={modelUsage}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="model" tick={{ fontSize: 10 }} angle={-30} textAnchor="end" height={80} />
-                        <YAxis />
-                        <Tooltip />
-                        <Bar dataKey="count" fill="#3b82f6" name="Requests" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                    <ResponsiveContainer width="100%" height={300}>
+            {/* Model Usage & Cost Distribution Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Model Usage Distribution */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Model Usage Distribution</CardTitle>
+                  <CardDescription>Request count per model</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {modelUsage && modelUsage.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={280}>
                       <PieChart>
                         <Pie
                           data={modelUsage}
@@ -396,14 +400,48 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
                         <Tooltip />
                       </PieChart>
                     </ResponsiveContainer>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    No model usage data yet. Data will appear after users send messages.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-8">
+                      No model usage data yet.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Model Cost Distribution */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Model Cost Distribution</CardTitle>
+                  <CardDescription>Estimated cost per model</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {modelUsage && modelUsage.some((m: any) => m.totalCost > 0) ? (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <PieChart>
+                        <Pie
+                          data={modelUsage.filter((m: any) => m.totalCost > 0)}
+                          dataKey="totalCost"
+                          nameKey="model"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={100}
+                          label={({ model, totalCost }) => `${model}: $${Number(totalCost).toFixed(4)}`}
+                        >
+                          {modelUsage.filter((m: any) => m.totalCost > 0).map((_: any, i: number) => (
+                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => `$${value.toFixed(6)}`} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-8">
+                      No cost data yet.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
 
             {/* Cost Analysis (enhanced with demo/real split) */}
             <CostAnalysis users={users} overview={overview} modelUsage={modelUsage} />
@@ -411,8 +449,8 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
             {/* Task Type Distribution */}
             <TaskTypeDistribution data={taskTypes} />
 
-            {/* Model Performance */}
-            <ModelPerformance modelUsage={modelUsage} />
+            {/* Model Performance with phase timings */}
+            <ModelPerformance modelUsage={modelUsage} phaseTimings={phaseTimings} />
           </TabsContent>
 
           {/* Users Tab */}
@@ -1185,7 +1223,24 @@ function TaskTypeDistribution({ data }: { data: any[] | undefined }) {
   );
 }
 
-function ModelPerformance({ modelUsage }: { modelUsage: any[] | undefined }) {
+/** Human-readable labels for phase timing keys */
+const PHASE_LABELS: Record<string, string> = {
+  dlpScanMs: "DLP Scan",
+  analysisMs: "AI Analysis",
+  modelSelectionMs: "Model Selection",
+  promptOptMs: "Prompt Optimization",
+  paramTuningMs: "Parameter Tuning",
+  systemContextMs: "System Context",
+  generationMs: "Response Generation",
+};
+
+function ModelPerformance({
+  modelUsage,
+  phaseTimings,
+}: {
+  modelUsage: any[] | undefined;
+  phaseTimings: any[] | undefined;
+}) {
   if (!modelUsage || modelUsage.length === 0) return null;
 
   // Derive performance data from model usage (enriched with avg response time)
@@ -1204,10 +1259,10 @@ function ModelPerformance({ modelUsage }: { modelUsage: any[] | undefined }) {
           Model Performance
         </CardTitle>
         <CardDescription>
-          Usage statistics and response times per model
+          End-to-end response times include all pipeline phases: analysis, model selection, optimization, and generation
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-6">
         <Table>
           <TableHeader>
             <TableRow>
@@ -1256,6 +1311,48 @@ function ModelPerformance({ modelUsage }: { modelUsage: any[] | undefined }) {
             })}
           </TableBody>
         </Table>
+
+        {/* Phase Timing Breakdown */}
+        {phaseTimings && phaseTimings.length > 0 && (
+          <div className="border-t pt-4">
+            <p className="text-sm font-medium mb-3 flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              Average Pipeline Phase Breakdown
+            </p>
+            <p className="text-xs text-muted-foreground mb-3">
+              Where time is spent in the analysis pipeline (averaged over recent requests)
+            </p>
+            <div className="space-y-2">
+              {(() => {
+                const totalMs = phaseTimings.reduce((sum: number, p: any) => sum + p.avgMs, 0);
+                return phaseTimings.map((p: any, i: number) => {
+                  const pct = totalMs > 0 ? (p.avgMs / totalMs) * 100 : 0;
+                  const label = PHASE_LABELS[p.phase] || p.phase;
+                  return (
+                    <div key={p.phase} className="flex items-center gap-3">
+                      <span className="text-xs w-36 shrink-0 text-muted-foreground">{label}</span>
+                      <div className="flex-1 bg-muted rounded-full h-3 relative overflow-hidden">
+                        <div
+                          className="h-3 rounded-full transition-all"
+                          style={{
+                            width: `${pct}%`,
+                            backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+                          }}
+                        />
+                      </div>
+                      <span className="text-xs font-medium w-16 text-right">
+                        {p.avgMs >= 1000 ? `${(p.avgMs / 1000).toFixed(1)}s` : `${p.avgMs}ms`}
+                      </span>
+                      <span className="text-xs text-muted-foreground w-10 text-right">
+                        {pct.toFixed(0)}%
+                      </span>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
