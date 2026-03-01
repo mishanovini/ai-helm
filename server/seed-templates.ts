@@ -171,6 +171,17 @@ const PROMPT_TEMPLATES: InsertPromptTemplate[] = [
     isGlobal: true,
   },
   {
+    title: "CRIT Analysis",
+    description: "Evaluate any claim or argument using the CRIT critical thinking framework",
+    category: "analysis",
+    promptText:
+      "Use the CRIT framework to critically evaluate the following claim or argument.\n\n**Claim / Argument:**\n[paste the claim, article excerpt, or argument here]\n\n**Context:** [where did this claim come from — news article, meeting, research paper, social media, etc.]\n\nAnalyze using each CRIT step:\n\n1. **Claim** — What exactly is being claimed? Restate it precisely.\n2. **Reasoning** — What reasoning or logic supports the claim? Are there logical fallacies?\n3. **Information** — What evidence or data is cited? Is it credible, sufficient, and current?\n4. **Thinking about Thinking** — What biases, assumptions, or perspectives might influence this claim? What's missing?\n\nEnd with an overall assessment: How strong is this claim on a scale of 1-10, and what would make it stronger?",
+    isPreset: false,
+    icon: "Brain",
+    tags: ["critical-thinking", "analysis", "evaluation", "crit", "reasoning"],
+    isGlobal: true,
+  },
+  {
     title: "Brainstorm Business Ideas",
     description: "Generate and evaluate startup or business concepts",
     category: "creative",

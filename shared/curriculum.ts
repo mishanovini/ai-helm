@@ -322,6 +322,125 @@ Professional: ?"
 When words aren't enough to explain what you want, show it. Examples are the most powerful tool for shaping AI output.`,
   },
   {
+    id: "ap-04-crit-framework",
+    title: "The CRIT Framework for Critical Thinking",
+    category: "advanced-prompting",
+    difficulty: "intermediate",
+    prerequisites: ["ap-01-chain-of-thought"],
+    estimatedMinutes: 8,
+    content: `# The CRIT Framework for Critical Thinking
+
+The CRIT framework is a structured method for evaluating claims, arguments, and information. When you use CRIT in your prompts, you turn the AI into a rigorous analytical partner instead of a passive answer machine.
+
+## What Is CRIT?
+
+CRIT stands for four steps of critical evaluation:
+
+| Step | Question | Purpose |
+|------|----------|---------|
+| **C**laim | What exactly is being said? | Isolate the core assertion |
+| **R**easoning | What logic supports it? | Evaluate the argument structure |
+| **I**nformation | What evidence backs it up? | Assess data quality and relevance |
+| **T**hinking about Thinking | What biases might be at play? | Metacognition — check blind spots |
+
+## Step by Step
+
+### C — Claim
+Before you can evaluate anything, you need to know *exactly* what's being claimed. Vague or shifting claims are impossible to analyze.
+
+**Ask the AI:**
+- "What is the precise claim being made here?"
+- "Restate this argument in one clear sentence."
+- "Is this a factual claim, an opinion, or a prediction?"
+
+**Why it matters:** Many arguments bundle multiple claims together. Separating them reveals which parts are strong and which are weak.
+
+### R — Reasoning
+Now examine the logical structure. Is the conclusion actually supported by the premises?
+
+**Ask the AI:**
+- "What logical steps connect the evidence to the conclusion?"
+- "Are there any logical fallacies in this reasoning?"
+- "Does the conclusion follow from the premises, or is it a leap?"
+
+**Common fallacies to watch for:**
+- **Ad hominem:** Attacking the person, not the argument
+- **Straw man:** Misrepresenting someone's position to make it easier to attack
+- **False dichotomy:** Presenting only two options when more exist
+- **Appeal to authority:** "An expert said it, so it must be true"
+- **Correlation ≠ causation:** Two things happening together doesn't mean one causes the other
+
+### I — Information
+Evidence quality matters as much as evidence quantity. A single well-designed study outweighs a dozen anecdotes.
+
+**Ask the AI:**
+- "What evidence supports this claim? Is it from credible sources?"
+- "Is the data current, or could it be outdated?"
+- "What's the sample size? Is it representative?"
+- "Is there contradicting evidence that's being ignored?"
+
+**Red flags:**
+- Cherry-picked statistics
+- Outdated data presented as current
+- No source citations
+- Anecdotal evidence treated as proof
+- Conflating correlation with causation
+
+### T — Thinking about Thinking
+This is the metacognitive step — examining the lenses through which the claim is made and evaluated, including your own.
+
+**Ask the AI:**
+- "What assumptions underlie this argument?"
+- "What perspectives are missing from this analysis?"
+- "What cognitive biases might affect how we interpret this?"
+- "Who benefits from this claim being accepted?"
+
+**Key biases to consider:**
+- **Confirmation bias:** Favoring information that confirms existing beliefs
+- **Anchoring:** Over-relying on the first piece of information encountered
+- **Survivorship bias:** Only seeing the successes, not the failures
+- **Dunning-Kruger effect:** Overestimating understanding of a topic
+
+## Using CRIT in Your Prompts
+
+### Basic CRIT Prompt
+"Use the CRIT framework to evaluate this claim: [paste claim]. Analyze the Claim, Reasoning, Information, and Thinking (biases/assumptions)."
+
+### CRIT for Decision-Making
+"I'm deciding whether to [decision]. Use CRIT to analyze the argument in favor:
+- C: What's the core claim for this choice?
+- R: What's the logical case?
+- I: What data supports it?
+- T: What biases might be pushing me toward this?"
+
+### CRIT for Source Evaluation
+"Apply CRIT to this article excerpt: [paste text]. Focus especially on the Information and Thinking steps — I want to know if this source is trustworthy."
+
+## CRIT vs. Other Frameworks
+
+| Framework | Best For |
+|-----------|----------|
+| **CRIT** | Evaluating claims and arguments |
+| **Chain of Thought** | Solving step-by-step problems |
+| **SWOT** | Strategic business analysis |
+| **Pro/Con** | Simple decision-making |
+
+CRIT is uniquely powerful because it includes the metacognitive step (T), which forces you to examine *how* you're thinking, not just *what* you're thinking.
+
+## Practice
+
+Try applying CRIT to these claims:
+1. "Remote workers are more productive than office workers."
+2. "AI will replace 80% of jobs within 10 years."
+3. "Organic food is healthier than conventional food."
+
+For each one, work through all four steps. Notice how the T step often reveals the most interesting insights.
+
+## Key Takeaway
+
+CRIT transforms you from a passive information consumer into an active critical thinker. By asking the AI to follow this framework, you get responses that don't just tell you *what* — they show you *why*, *how well-supported*, and *what might be wrong*.`,
+  },
+  {
     id: "ap-03-system-prompts",
     title: "Effective System Prompts",
     category: "advanced-prompting",
