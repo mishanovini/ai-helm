@@ -27,6 +27,7 @@ import {
 // Uses coercion and defaults to handle imprecise LLM output gracefully.
 const consolidatedSchema = z.object({
   intent: z.string().default("general"),
+  conversationTitle: z.string().default("New Chat"),
   sentiment: z.enum(["positive", "neutral", "negative"]).catch("neutral"),
   sentimentDetail: z.string().default("neutral"),
   style: z.enum(["formal", "casual", "technical", "concise", "verbose", "neutral"]).catch("neutral"),
@@ -183,6 +184,7 @@ async function callConsolidatedAnalysis(
 
 {
   "intent": "1-2 sentence description of what the user is trying to accomplish",
+  "conversationTitle": "2-4 word topic label for this conversation (e.g. 'Debug React Hook', 'Business Ideas', 'Email Draft')",
   "sentiment": "positive" | "neutral" | "negative",
   "sentimentDetail": "2-3 word emotion description",
   "style": "formal" | "casual" | "technical" | "concise" | "verbose" | "neutral",
@@ -401,8 +403,13 @@ async function runFallbackAnalysis(
     suggestions.push("Be more specific about what you need");
   if (suggestions.length === 0) suggestions.push("Consider adding context or constraints");
 
+  // Generate a short title from the first few meaningful words
+  const titleWords = message.replace(/[*#\[\]`]/g, "").trim().split(/\s+/).slice(0, 4).join(" ");
+  const conversationTitle = titleWords.length > 30 ? titleWords.substring(0, 27) + "..." : titleWords;
+
   return {
     intent: intentResult.intent,
+    conversationTitle,
     sentiment: (
       ["positive", "neutral", "negative"].includes(sentimentResult.sentiment)
         ? sentimentResult.sentiment

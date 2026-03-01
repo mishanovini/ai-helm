@@ -50,6 +50,8 @@ export interface PromptQuality {
 
 export interface ConsolidatedAnalysisResult {
   intent: string;
+  /** Short 2-4 word topic label for sidebar display (e.g., "Debug React Hook") */
+  conversationTitle: string;
   sentiment: "positive" | "neutral" | "negative";
   sentimentDetail: string;
   style: "formal" | "casual" | "technical" | "concise" | "verbose" | "neutral";

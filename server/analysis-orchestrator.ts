@@ -580,12 +580,10 @@ export async function runAnalysisJob(
           role: "assistant",
           content: aiResponse,
         });
-        // Update conversation title from intent if it's still null
+        // Update conversation title if it's still null
         const conv = await storage.getConversation(job.conversationId);
         if (conv && !conv.title) {
-          const title = analysis.intent.length > 60
-            ? analysis.intent.substring(0, 57) + "..."
-            : analysis.intent;
+          const title = analysis.conversationTitle || analysis.intent.substring(0, 40);
           await storage.updateConversationTitle(job.conversationId, title);
         }
       } catch {
