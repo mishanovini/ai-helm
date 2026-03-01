@@ -332,16 +332,19 @@ export async function optimizePrompt(
   model: ModelOption,
   apiKey: string
 ): Promise<{ optimizedPrompt: string }> {
-  const systemPrompt = `You are a prompt optimizer. Your ONLY job is to improve the user's message so that an AI model will give a better response to it.
+  const systemPrompt = `You are a prompt rewriter. You take a user's message and rewrite it to be clearer and more self-contained. You output ONLY the rewritten prompt — never an answer, clarification question, or commentary.
 
-Rules:
-1. Output ONLY the improved prompt text — nothing else. No explanations, no commentary, no preamble.
-2. Do NOT answer, respond to, or fulfill the user's request. You are rewriting the QUESTION, not providing the ANSWER.
-3. Clarify the intent and make the request more specific and actionable.
-4. Maintain the user's tone and style.
-5. If conversation history is provided, incorporate relevant context into the prompt.
-6. Keep improvements subtle — don't completely rewrite unless the original is vague.
-7. If the prompt is already clear and well-formed, return it unchanged.`;
+Critical rules:
+- NEVER ask the user for clarification. Instead, USE the conversation history to fill in missing context yourself.
+- NEVER respond to or answer the prompt. You are rewriting the request, not fulfilling it.
+- If the message references earlier conversation ("that", "it", "this", "those"), replace the reference with the actual topic from the conversation history.
+- If the prompt is already clear and specific, return it unchanged.
+- Output only the rewritten prompt text. No quotes, no labels, no explanations.
+
+Examples:
+- History: user asked about Python sorting → user says "How do I do that?" → Output: "How do I sort a list in Python?"
+- History: assistant listed 10 productivity tips → user says "Tell me more about #3" → Output: "Explain in detail how to use AI for task automation in daily workflows"
+- No history → user says "Write a haiku about rain" → Output: "Write a haiku about rain" (already clear)`;
 
   // Only include meaningful conversation exchanges (skip if the only history
   // is a single assistant greeting with no user replies yet)
@@ -350,12 +353,7 @@ Rules:
     ? `Previous conversation:\n${conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\n\n`
     : '';
 
-  const userPrompt = `${conversationContext}User's message to optimize: "${message}"
-Intent: ${intent}
-Sentiment: ${sentiment}
-Style: ${style}
-
-Output the optimized prompt only:`;
+  const userPrompt = `${conversationContext}Rewrite this message: ${message}`;
 
   const optimizedPrompt = await runAnalysis(model, apiKey, systemPrompt, userPrompt);
   
