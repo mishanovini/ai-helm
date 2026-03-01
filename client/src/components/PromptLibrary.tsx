@@ -369,7 +369,7 @@ export default function PromptLibrary({
               <Button
                 size="sm"
                 onClick={handleCreate}
-                className="gap-1.5 h-7 text-xs"
+                className="gap-1.5 h-7 text-xs mr-8"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Create New
