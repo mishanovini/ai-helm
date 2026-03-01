@@ -149,7 +149,7 @@ export async function runAnalysisJob(
 
     let analysis: ConsolidatedAnalysisResult | undefined;
     try {
-      analysis = await runConsolidatedAnalysis(safeMessage, analysisModel, analysisApiKey, customTaskTypes);
+      analysis = await runConsolidatedAnalysis(safeMessage, analysisModel, analysisApiKey, customTaskTypes, safeHistory);
     } catch (firstError: any) {
       console.warn(`Consolidated analysis failed with ${analysisModel.provider}: ${firstError.message}`);
       // Primary analysis model failed — try fallback providers before giving up
@@ -159,7 +159,7 @@ export async function runAnalysisJob(
           console.warn(
             `Analysis failed with ${analysisModel.provider}, retrying with ${fallbackModel.provider}`
           );
-          analysis = await runConsolidatedAnalysis(safeMessage, fallbackModel, fallbackKey, customTaskTypes);
+          analysis = await runConsolidatedAnalysis(safeMessage, fallbackModel, fallbackKey, customTaskTypes, safeHistory);
           // Update analysis model/key for subsequent phases (prompt opt, param tuning, validation)
           Object.assign(analysisModel, fallbackModel);
           analysisApiKey = fallbackKey;

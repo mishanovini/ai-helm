@@ -176,11 +176,14 @@ async function callConsolidatedAnalysis(
   message: string,
   model: ModelOption,
   apiKey: string,
-  customTaskTypes?: CustomTaskType[]
+  customTaskTypes?: CustomTaskType[],
+  conversationHistory?: Array<{role: string; content: string}>
 ): Promise<string> {
   const taskTypeInstruction = buildTaskTypeInstruction(customTaskTypes);
 
   const systemPrompt = `You are an advanced AI analysis engine. Analyze the user's message and return a JSON object with ALL of the following fields. Respond with ONLY valid JSON, no markdown or explanation.
+
+IMPORTANT: If conversation history is provided, use it to understand the full context of the user's message. Short or vague messages (like a single word) may be answering a question from the previous assistant message — interpret them in that context.
 
 {
   "intent": "1-2 sentence description of what the user is trying to accomplish",
@@ -216,11 +219,24 @@ PROMPT QUALITY SCORING:
 
 Provide 1-3 short improvement suggestions. If the prompt is already excellent, suggest advanced techniques.`;
 
+  // Build context-aware user content: include recent history so the LLM
+  // understands short follow-up messages (e.g., "diamonds" in response to
+  // "What topic would you like me to help you research?").
+  let userContent = message;
+  if (conversationHistory && conversationHistory.length > 0) {
+    // Include last few exchanges (cap to avoid token bloat)
+    const recent = conversationHistory.slice(-6);
+    const historyText = recent
+      .map(m => `${m.role}: ${m.content}`)
+      .join("\n");
+    userContent = `Conversation so far:\n${historyText}\n\nAnalyze this latest message:\n${message}`;
+  }
+
   if (model.provider === "gemini") {
     const genai = new GoogleGenAI({ apiKey });
     const result = await genai.models.generateContent({
       model: model.model,
-      contents: `${systemPrompt}\n\nAnalyze this message:\n${message}`,
+      contents: `${systemPrompt}\n\n${userContent}`,
     });
     return result.text?.trim() || "";
   } else if (model.provider === "openai") {
@@ -229,7 +245,7 @@ Provide 1-3 short improvement suggestions. If the prompt is already excellent, s
       model: model.model,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: message },
+        { role: "user", content: userContent },
       ],
       temperature: 0.3,
       max_tokens: 800,
@@ -242,7 +258,7 @@ Provide 1-3 short improvement suggestions. If the prompt is already excellent, s
       max_tokens: 800,
       temperature: 0.3,
       system: systemPrompt,
-      messages: [{ role: "user", content: message }],
+      messages: [{ role: "user", content: userContent }],
     });
     const content = msg.content[0];
     return content.type === "text" ? content.text : "";
@@ -268,14 +284,15 @@ export async function runConsolidatedAnalysis(
   message: string,
   model: ModelOption,
   apiKey: string,
-  customTaskTypes?: CustomTaskType[]
+  customTaskTypes?: CustomTaskType[],
+  conversationHistory?: Array<{role: string; content: string}>
 ): Promise<ConsolidatedAnalysisResult> {
   // Step 1: Security pre-check
   const { floorScore, flags } = securityPreCheck(message);
 
   try {
     // Step 2: Single LLM call (with custom types injected into prompt)
-    const rawResponse = await callConsolidatedAnalysis(message, model, apiKey, customTaskTypes);
+    const rawResponse = await callConsolidatedAnalysis(message, model, apiKey, customTaskTypes, conversationHistory);
 
     // Step 3: Extract JSON from response (handle markdown code blocks)
     let jsonStr = rawResponse;
