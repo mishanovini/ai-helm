@@ -323,122 +323,159 @@ When words aren't enough to explain what you want, show it. Examples are the mos
   },
   {
     id: "ap-04-crit-framework",
-    title: "The CRIT Framework for Critical Thinking",
+    title: "The CRIT Framework: Context, Role, Interview, Task",
     category: "advanced-prompting",
     difficulty: "intermediate",
-    prerequisites: ["ap-01-chain-of-thought"],
+    prerequisites: ["pb-02-specificity"],
     estimatedMinutes: 8,
-    content: `# The CRIT Framework for Critical Thinking
+    content: `# The CRIT Framework: Context, Role, Interview, Task
 
-The CRIT framework is a structured method for evaluating claims, arguments, and information. When you use CRIT in your prompts, you turn the AI into a rigorous analytical partner instead of a passive answer machine.
+CRIT is a four-part framework for structuring prompts that consistently produce high-quality AI responses. Instead of sending a bare request and hoping for the best, CRIT gives the AI everything it needs to deliver exactly what you want.
 
 ## What Is CRIT?
 
-CRIT stands for four steps of critical evaluation:
+| Step | What You Provide | Why It Matters |
+|------|-----------------|----------------|
+| **C**ontext | Background, situation, constraints | Grounds the AI in your real-world scenario |
+| **R**ole | Who the AI should be | Activates domain-specific knowledge and tone |
+| **I**nterview | Permission to ask clarifying questions | Fills gaps you didn't know existed |
+| **T**ask | The specific deliverable you need | Defines exactly what "done" looks like |
 
-| Step | Question | Purpose |
-|------|----------|---------|
-| **C**laim | What exactly is being said? | Isolate the core assertion |
-| **R**easoning | What logic supports it? | Evaluate the argument structure |
-| **I**nformation | What evidence backs it up? | Assess data quality and relevance |
-| **T**hinking about Thinking | What biases might be at play? | Metacognition — check blind spots |
+Most people only provide the **T** (Task). CRIT ensures the AI has the full picture.
 
 ## Step by Step
 
-### C — Claim
-Before you can evaluate anything, you need to know *exactly* what's being claimed. Vague or shifting claims are impossible to analyze.
+### C — Context
+Context is the background information the AI needs to give a relevant answer. Without it, the AI makes assumptions — and assumptions lead to generic responses.
 
-**Ask the AI:**
-- "What is the precise claim being made here?"
-- "Restate this argument in one clear sentence."
-- "Is this a factual claim, an opinion, or a prediction?"
+**What to include:**
+- Your role, industry, or domain
+- The situation or problem background
+- Constraints (time, budget, audience, tools)
+- What you've already tried
 
-**Why it matters:** Many arguments bundle multiple claims together. Separating them reveals which parts are strong and which are weak.
+**Examples:**
 
-### R — Reasoning
-Now examine the logical structure. Is the conclusion actually supported by the premises?
+**Without context:** "Write a marketing email."
+**With context:** "I'm a product manager at a B2B SaaS company. We just launched a new feature (automated reporting) and need to announce it to our existing enterprise customers. Our brand voice is professional but approachable."
 
-**Ask the AI:**
-- "What logical steps connect the evidence to the conclusion?"
-- "Are there any logical fallacies in this reasoning?"
-- "Does the conclusion follow from the premises, or is it a leap?"
+**Without context:** "Help me with a presentation."
+**With context:** "I'm presenting quarterly results to our board of directors next Tuesday. They're non-technical but very data-driven. I have 20 minutes."
 
-**Common fallacies to watch for:**
-- **Ad hominem:** Attacking the person, not the argument
-- **Straw man:** Misrepresenting someone's position to make it easier to attack
-- **False dichotomy:** Presenting only two options when more exist
-- **Appeal to authority:** "An expert said it, so it must be true"
-- **Correlation ≠ causation:** Two things happening together doesn't mean one causes the other
+### R — Role
+Assigning a role tells the AI *whose* expertise to channel. This dramatically changes the quality, depth, and tone of the response.
 
-### I — Information
-Evidence quality matters as much as evidence quantity. A single well-designed study outweighs a dozen anecdotes.
+**The difference role makes:**
 
-**Ask the AI:**
-- "What evidence supports this claim? Is it from credible sources?"
-- "Is the data current, or could it be outdated?"
-- "What's the sample size? Is it representative?"
-- "Is there contradicting evidence that's being ignored?"
+| Prompt | Response Style |
+|--------|---------------|
+| "Review my code" | Generic feedback |
+| "As a senior security engineer, review my code" | Focuses on vulnerabilities, injection risks, auth flaws |
+| "As a performance engineer at a FAANG company, review my code" | Focuses on bottlenecks, memory leaks, scalability |
 
-**Red flags:**
-- Cherry-picked statistics
-- Outdated data presented as current
-- No source citations
-- Anecdotal evidence treated as proof
-- Conflating correlation with causation
+**Good roles are specific:**
+- Not "Act as an expert" → but "Act as a pediatric nurse with 10 years of experience in patient education"
+- Not "Be a writer" → but "Act as a technical writer who specializes in developer documentation for APIs"
+- Not "Be a business advisor" → but "Act as a startup CFO who has guided 5 companies through Series A fundraising"
 
-### T — Thinking about Thinking
-This is the metacognitive step — examining the lenses through which the claim is made and evaluated, including your own.
+**Why specificity matters:** A "marketing expert" gives you textbook advice. A "growth marketer who scaled a D2C brand from $0 to $10M ARR" gives you battle-tested tactics.
 
-**Ask the AI:**
-- "What assumptions underlie this argument?"
-- "What perspectives are missing from this analysis?"
-- "What cognitive biases might affect how we interpret this?"
-- "Who benefits from this claim being accepted?"
+### I — Interview
+This is the step most people skip, and it's the one that makes the biggest difference. Instead of guessing what details you need to provide, you **invite the AI to ask you clarifying questions** before it responds.
 
-**Key biases to consider:**
-- **Confirmation bias:** Favoring information that confirms existing beliefs
-- **Anchoring:** Over-relying on the first piece of information encountered
-- **Survivorship bias:** Only seeing the successes, not the failures
-- **Dunning-Kruger effect:** Overestimating understanding of a topic
+**How to use it:**
+- "Before you start, ask me 3-5 clarifying questions to make sure you understand what I need."
+- "Interview me about my requirements before producing the deliverable."
+- "What additional information would help you give me a better answer?"
 
-## Using CRIT in Your Prompts
+**Why it works:**
+1. **You don't know what you don't know.** The AI often identifies gaps in your brief that you hadn't considered.
+2. **It creates a dialogue.** Back-and-forth produces better results than one-shot prompts.
+3. **It prevents wasted effort.** Five questions up front save three rounds of revision later.
 
-### Basic CRIT Prompt
-"Use the CRIT framework to evaluate this claim: [paste claim]. Analyze the Claim, Reasoning, Information, and Thinking (biases/assumptions)."
+**Example interview questions the AI might ask:**
+- "Who is the primary audience for this document?"
+- "What's the most common objection you hear from prospects?"
+- "Should I prioritize brevity or thoroughness?"
+- "Are there any competitors or examples you'd like me to reference?"
 
-### CRIT for Decision-Making
-"I'm deciding whether to [decision]. Use CRIT to analyze the argument in favor:
-- C: What's the core claim for this choice?
-- R: What's the logical case?
-- I: What data supports it?
-- T: What biases might be pushing me toward this?"
+### T — Task
+The task is the specific deliverable you want. Be precise about the format, length, and success criteria.
 
-### CRIT for Source Evaluation
-"Apply CRIT to this article excerpt: [paste text]. Focus especially on the Information and Thinking steps — I want to know if this source is trustworthy."
+**Weak tasks vs. strong tasks:**
+
+| Weak | Strong |
+|------|--------|
+| "Give me ideas" | "Give me 10 tagline options, each under 8 words, with a playful tone" |
+| "Write a summary" | "Write a 3-paragraph executive summary: problem, approach, expected outcome" |
+| "Help me plan" | "Create a 4-week project timeline as a table with columns: Week, Milestones, Owner, Status" |
+
+**A good task defines:**
+- What the output IS (email, outline, code, table, etc.)
+- How long or detailed it should be
+- What format to use (bullets, table, narrative, code block)
+- What "done" looks like
+
+## Putting It All Together
+
+### Example: Content Strategy
+
+**C — Context:** "I run a small freelance web design studio. I want to start content marketing to attract clients, but I only have 3 hours per week to dedicate to it. My target clients are small business owners who need a new website."
+
+**R — Role:** "Act as a content marketing strategist who specializes in service-based small businesses with limited budgets."
+
+**I — Interview:** "Before creating a plan, ask me 5 questions about my current marketing, ideal clients, and content preferences."
+
+**T — Task:** "After the interview, create a 90-day content calendar as a table. Include: week number, content topic, format (blog/social/email), estimated time to produce, and which stage of the sales funnel it targets."
+
+### Example: Code Review
+
+**C — Context:** "This is a Node.js Express API endpoint for user registration. It's part of a healthcare app that will handle PHI (Protected Health Information). We use PostgreSQL with Drizzle ORM."
+
+**R — Role:** "Act as a senior backend engineer with HIPAA compliance experience."
+
+**I — Interview:** "Before reviewing, ask me about our authentication approach, logging practices, and deployment environment."
+
+**T — Task:** "Review the code for security vulnerabilities, HIPAA compliance issues, and performance concerns. Format as a numbered list of findings, each with: severity (critical/high/medium/low), the issue, and a code snippet showing the fix."
+
+## When to Use Each Step
+
+You don't always need all four steps. Here's when each one adds the most value:
+
+| Scenario | C | R | I | T |
+|----------|---|---|---|---|
+| Quick factual question | - | - | - | ✓ |
+| Creative writing task | ✓ | ✓ | - | ✓ |
+| Complex analysis | ✓ | ✓ | ✓ | ✓ |
+| Ongoing project work | ✓ | ✓ | ✓ | ✓ |
+| Simple format conversion | ✓ | - | - | ✓ |
+
+**Rule of thumb:** The more important the output, the more CRIT steps you should use. A quick question needs only T. A strategy document needs all four.
 
 ## CRIT vs. Other Frameworks
 
-| Framework | Best For |
-|-----------|----------|
-| **CRIT** | Evaluating claims and arguments |
-| **Chain of Thought** | Solving step-by-step problems |
-| **SWOT** | Strategic business analysis |
-| **Pro/Con** | Simple decision-making |
+| Framework | Focus |
+|-----------|-------|
+| **CRIT** | Structuring prompts for comprehensive, tailored responses |
+| **Chain of Thought** | Getting the AI to show its reasoning step by step |
+| **Few-Shot** | Teaching patterns through examples |
+| **System Prompts** | Setting persistent behavior for an entire conversation |
 
-CRIT is uniquely powerful because it includes the metacognitive step (T), which forces you to examine *how* you're thinking, not just *what* you're thinking.
+CRIT works well *alongside* these other techniques. You can use CRIT to structure your prompt and Chain of Thought within the Task step ("Think step by step...").
 
 ## Practice
 
-Try applying CRIT to these claims:
-1. "Remote workers are more productive than office workers."
-2. "AI will replace 80% of jobs within 10 years."
-3. "Organic food is healthier than conventional food."
+Try restructuring these flat prompts using CRIT:
 
-For each one, work through all four steps. Notice how the T step often reveals the most interesting insights.
+1. "Help me write a resume" → Add your industry, target role, years of experience (C), specify a career coach role (R), invite questions about your achievements (I), and define the output format (T).
+
+2. "Explain machine learning" → Add who you are and why you need to know (C), pick an instructor role (R), let the AI ask about your math background (I), and specify depth and format (T).
+
+3. "Review my business plan" → Add your industry and stage (C), choose an investor or advisor role (R), ask the AI to interview you about your market (I), and define what feedback format you want (T).
 
 ## Key Takeaway
 
-CRIT transforms you from a passive information consumer into an active critical thinker. By asking the AI to follow this framework, you get responses that don't just tell you *what* — they show you *why*, *how well-supported*, and *what might be wrong*.`,
+CRIT turns a one-shot guess into a structured conversation. By providing Context, assigning a Role, inviting an Interview, and defining the Task, you give the AI everything it needs to deliver a response that's specific, expert-level, and exactly what you asked for.`,
   },
   {
     id: "ap-03-system-prompts",
