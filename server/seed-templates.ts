@@ -414,12 +414,31 @@ The goal is not to "win" — it's to help the user think more clearly and arrive
 ];
 
 // ============================================================================
+// Renamed / Retired Templates
+// ============================================================================
+
+/**
+ * Templates that were renamed or removed in code updates. On startup,
+ * the seeder deletes any database records matching these titles so stale
+ * entries don't linger alongside their replacements.
+ */
+const RETIRED_TITLES: string[] = [
+  "CRIT Analysis", // Renamed → "CRIT Framework" (was using wrong definition)
+];
+
+// ============================================================================
 // Seed Runner
 // ============================================================================
 
 /**
  * Seeds the database with default prompt templates and AI presets.
- * Idempotent — skips templates that already exist (matched by title).
+ *
+ * Behaviour per template:
+ *   - If a template with the same title already exists AND is a global seed
+ *     template, its content is updated to match the code definition (upsert).
+ *   - If no match exists, a new template is created.
+ *   - Retired/renamed templates are cleaned up first.
+ *
  * Called during server startup when the database is available.
  */
 export async function seedPromptTemplates(): Promise<void> {
@@ -428,18 +447,57 @@ export async function seedPromptTemplates(): Promise<void> {
     return;
   }
 
+  // Phase 1: Remove retired/renamed templates
+  let retired = 0;
+  for (const title of RETIRED_TITLES) {
+    try {
+      const matches = await storage.listPromptTemplates({ search: title }, 5);
+      const exact = matches.find(t => t.title === title && t.isGlobal);
+      if (exact) {
+        await storage.deletePromptTemplate(exact.id);
+        retired++;
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+  if (retired > 0) {
+    console.log(`[seed] Cleaned up ${retired} retired template(s)`);
+  }
+
+  // Phase 2: Upsert seed templates
   const allTemplates = [...PROMPT_TEMPLATES, ...AI_PRESETS];
   let created = 0;
-  let skipped = 0;
+  let updated = 0;
+  let unchanged = 0;
 
   for (const template of allTemplates) {
     try {
-      // Check if a template with this title already exists
-      const existing = await storage.listPromptTemplates({ search: template.title }, 1);
+      const existing = await storage.listPromptTemplates({ search: template.title }, 5);
       const exactMatch = existing.find(t => t.title === template.title);
 
       if (exactMatch) {
-        skipped++;
+        // Update global seed templates to keep content in sync with code
+        if (exactMatch.isGlobal) {
+          const changed =
+            exactMatch.description !== template.description ||
+            exactMatch.promptText !== template.promptText ||
+            exactMatch.systemPrompt !== (template.systemPrompt ?? null) ||
+            exactMatch.category !== template.category ||
+            exactMatch.icon !== template.icon ||
+            exactMatch.starterMessage !== (template.starterMessage ?? null) ||
+            JSON.stringify(exactMatch.tags) !== JSON.stringify(template.tags);
+
+          if (changed) {
+            await storage.updatePromptTemplate(exactMatch.id, template);
+            updated++;
+          } else {
+            unchanged++;
+          }
+        } else {
+          // User-created template with same title — don't overwrite
+          unchanged++;
+        }
         continue;
       }
 
@@ -447,12 +505,12 @@ export async function seedPromptTemplates(): Promise<void> {
       created++;
     } catch (err) {
       // Non-fatal — log and continue with remaining templates
-      console.warn(`[seed] Failed to create template "${template.title}":`, err);
+      console.warn(`[seed] Failed to seed template "${template.title}":`, err);
     }
   }
 
-  const failed = allTemplates.length - created - skipped;
+  const failed = allTemplates.length - created - updated - unchanged;
   console.log(
-    `[seed] Prompt templates: ${created} created, ${skipped} existed, ${failed} failed (${allTemplates.length} total)`
+    `[seed] Prompt templates: ${created} created, ${updated} updated, ${unchanged} unchanged, ${failed} failed (${allTemplates.length} total)`
   );
 }
