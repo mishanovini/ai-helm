@@ -813,6 +813,8 @@ export class DatabaseStorage implements IStorage {
 
     const userIds = orgUsers.map(u => u.id);
 
+    // Exclude security-halted requests (selectedModel is null) — they never
+    // reached model selection and would show as "Unknown" in charts
     const results = await this.db
       .select({
         model: analysisLogs.selectedModel,
@@ -822,7 +824,12 @@ export class DatabaseStorage implements IStorage {
         avgResponseTimeMs: avg(analysisLogs.responseTimeMs),
       })
       .from(analysisLogs)
-      .where(inArray(analysisLogs.userId, userIds))
+      .where(
+        and(
+          inArray(analysisLogs.userId, userIds),
+          sql`${analysisLogs.selectedModel} IS NOT NULL`
+        )
+      )
       .groupBy(analysisLogs.selectedModel, analysisLogs.modelProvider);
 
     return results.map(r => ({

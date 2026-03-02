@@ -459,10 +459,15 @@ export async function runAnalysisJob(
     const failedProviders = new Set<Provider>();
     const providerFailures: ProviderFailure[] = [];
 
+    /** Accumulate generation-only and validation-only durations across retries */
+    let totalGenerationMs = 0;
+    let totalValidationMs = 0;
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       // --- Phase 5: Generate ---
       aiResponse = "";
       sendUpdate("generating", "processing");
+      const genStart = Date.now();
       try {
         aiResponse = await generateResponseStream(
           results.optimizedPrompt,
@@ -477,12 +482,14 @@ export async function runAnalysisJob(
           job.signal,
           resolvedSystemPrompt
         );
+        totalGenerationMs += Date.now() - genStart;
 
         const costLabel = results.estimatedCost?.displayText ?? "~$0.001";
         sendUpdate("generating", "completed", {
           message: `Response generated using ${currentModel.displayName} (${costLabel})`
         });
       } catch (generationError: any) {
+        totalGenerationMs += Date.now() - genStart;
         // Track this provider failure
         failedProviders.add(currentModel.provider);
         providerFailures.push({
@@ -540,6 +547,7 @@ export async function runAnalysisJob(
 
       // --- Phase 6: Validate ---
       sendUpdate("validating", "processing");
+      const valStart = Date.now();
       try {
         const validation = await validateResponse(
           safeMessage,
@@ -548,6 +556,8 @@ export async function runAnalysisJob(
           analysisModel,
           analysisApiKey
         );
+
+        totalValidationMs += Date.now() - valStart;
 
         if (validation.passed || attempt === MAX_RETRIES) {
           // Accept this response — either it passed or we've exhausted retries
@@ -609,6 +619,7 @@ export async function runAnalysisJob(
         results.estimatedCost = estimateCost(currentModel, estimatedInputTokens, 500);
 
       } catch (error: any) {
+        totalValidationMs += Date.now() - valStart;
         // Validation failed to run — accept the response as-is (non-fatal)
         console.warn(`Validation call failed: ${error.message}`);
         sendUpdate("validating", "completed", {
@@ -651,9 +662,9 @@ export async function runAnalysisJob(
           style: analysis.style,
           securityScore: analysis.securityScore,
           securityExplanation: analysis.securityExplanation,
-          selectedModel: results.selectedModel?.model,
-          modelDisplayName: results.selectedModel?.displayName,
-          modelProvider: results.selectedModel?.provider,
+          selectedModel: results.finalModel?.model ?? results.selectedModel?.model,
+          modelDisplayName: results.finalModel?.displayName ?? results.selectedModel?.displayName,
+          modelProvider: results.finalModel?.provider ?? results.selectedModel?.provider,
           reasoning: results.modelReasoning,
           fallbackModel: results.fallbackModel?.displayName || null,
           estimatedCost: results.estimatedCost?.displayText,
@@ -677,7 +688,10 @@ export async function runAnalysisJob(
     // Analytics Logging (fire-and-forget)
     // ========================================================================
 
-    phaseTimings.generationMs = Date.now() - phaseStart;
+    // Record split timings: generation-only vs validation-only
+    // (Previously this was a single monolithic timer covering the entire retry loop)
+    phaseTimings.generationMs = totalGenerationMs;
+    phaseTimings.validationMs = totalValidationMs;
 
     if (job.userId) {
       const responseTimeMs = Date.now() - startTime;
@@ -691,8 +705,10 @@ export async function runAnalysisJob(
           securityHalted: false,
           taskType: analysis.taskType,
           complexity: analysis.complexity,
-          selectedModel: results.selectedModel?.model,
-          modelProvider: results.selectedModel?.provider,
+          // Log the model that ACTUALLY generated the response (after any
+          // validation retries / provider failovers), not the originally selected one
+          selectedModel: results.finalModel?.model ?? results.selectedModel?.model,
+          modelProvider: results.finalModel?.provider ?? results.selectedModel?.provider,
           routerRuleMatched: results.routerRuleMatched || null,
           estimatedCost: results.estimatedCost?.totalCost,
           promptQualityScore: analysis.promptQuality.score,
@@ -714,7 +730,7 @@ export async function runAnalysisJob(
           const qualityHistory = [...(progress.promptQualityHistory ?? []), analysis.promptQuality.score];
           const avgQuality = qualityHistory.reduce((a, b) => a + b, 0) / qualityHistory.length;
           const modelStats = { ...(progress.modelUsageStats ?? {}) };
-          const modelKey = results.selectedModel?.model || "unknown";
+          const modelKey = results.finalModel?.model ?? results.selectedModel?.model ?? "unknown";
           modelStats[modelKey] = (modelStats[modelKey] || 0) + 1;
 
           await storage.updateUserProgress(job.userId, {

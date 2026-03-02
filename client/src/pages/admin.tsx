@@ -1251,6 +1251,7 @@ const PHASE_LABELS: Record<string, string> = {
   paramTuningMs: "Param Tuning",
   systemContextMs: "Sys Context",
   generationMs: "Generation",
+  validationMs: "Validation",
 };
 
 /** Pipeline execution order — vertical bars will appear left-to-right in this sequence */
@@ -1262,6 +1263,7 @@ const PHASE_ORDER = [
   "paramTuningMs",
   "systemContextMs",
   "generationMs",
+  "validationMs",
 ];
 
 /** Distinct colors for each pipeline phase (matches execution order) */
@@ -1273,6 +1275,7 @@ const PHASE_COLORS: Record<string, string> = {
   paramTuningMs: "#ef4444",   // red
   systemContextMs: "#64748b", // slate
   generationMs: "#a855f7",    // purple
+  validationMs: "#06b6d4",    // cyan
 };
 
 function ModelPerformance({

@@ -347,9 +347,16 @@ export async function runConsolidatedAnalysis(
     // previous instructions" causes the LLM to fabricate a benign intent).
     const finalIntent = intentOverride ?? result.intent;
 
+    // Step 7: Override conversation title when intent is overridden.
+    // The LLM fabricates benign titles ("Cloud Types Explained") for injections.
+    const finalTitle = intentOverride
+      ? "Security Blocked Request"
+      : result.conversationTitle;
+
     return {
       ...result,
       intent: finalIntent,
+      conversationTitle: finalTitle,
       securityScore: Math.min(finalSecurityScore, 10),
       securityExplanation: finalSecurityExplanation,
     };
@@ -452,9 +459,13 @@ async function runFallbackAnalysis(
     suggestions.push("Be more specific about what you need");
   if (suggestions.length === 0) suggestions.push("Consider adding context or constraints");
 
-  // Generate a short title from the first few meaningful words
-  const titleWords = message.replace(/[*#\[\]`]/g, "").trim().split(/\s+/).slice(0, 4).join(" ");
-  const conversationTitle = titleWords.length > 30 ? titleWords.substring(0, 27) + "..." : titleWords;
+  // Generate a short title — override with security label when threat detected
+  const conversationTitle = intentOverride
+    ? "Security Blocked Request"
+    : (() => {
+        const titleWords = message.replace(/[*#\[\]`]/g, "").trim().split(/\s+/).slice(0, 4).join(" ");
+        return titleWords.length > 30 ? titleWords.substring(0, 27) + "..." : titleWords;
+      })();
 
   return {
     intent: intentOverride ?? intentResult.intent,
