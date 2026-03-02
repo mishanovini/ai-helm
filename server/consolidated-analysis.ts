@@ -90,31 +90,42 @@ const socialEngineeringPatterns = [
 
 /**
  * Run regex-based security pre-check. Returns a floor score that the AI
- * analysis cannot go below.
+ * analysis cannot go below, plus an intent override for critical threats
+ * (where the LLM itself may have been manipulated by the injection).
  */
-function securityPreCheck(message: string): { floorScore: number; flags: string[] } {
+function securityPreCheck(message: string): {
+  floorScore: number;
+  flags: string[];
+  /** When set, replaces the LLM's intent — needed because the LLM may obey the injection */
+  intentOverride?: string;
+} {
   const flags: string[] = [];
   let floorScore = 0;
+  let intentOverride: string | undefined;
 
   for (const pattern of criticalPatterns) {
     if (pattern.test(message)) {
-      floorScore = Math.max(floorScore, 8);
+      // Direct prompt injection commands are unambiguously malicious — score 9-10
+      floorScore = Math.max(floorScore, 9);
       flags.push("Critical threat pattern detected");
+      // The LLM cannot be trusted here — the injection may have manipulated its output
+      intentOverride = "Direct prompt injection attempt — the user is trying to override system instructions, extract internal configuration, or bypass safety controls.";
       break;
     }
   }
 
-  if (floorScore < 8) {
+  if (floorScore < 9) {
     for (const pattern of exploitationPatterns) {
       if (pattern.test(message)) {
-        floorScore = Math.max(floorScore, 6);
+        floorScore = Math.max(floorScore, 7);
         flags.push("Exploitation learning pattern detected");
+        intentOverride = "The user is seeking information about AI exploitation techniques (jailbreaking, prompt injection, or safety bypass methods).";
         break;
       }
     }
   }
 
-  if (floorScore < 6) {
+  if (floorScore < 7) {
     let socialEngFlags = 0;
     for (const pattern of socialEngineeringPatterns) {
       if (pattern.test(message)) {
@@ -125,14 +136,15 @@ function securityPreCheck(message: string): { floorScore: number; flags: string[
       // Multiple social engineering signals → high confidence
       floorScore = Math.max(floorScore, 6);
       flags.push("Social engineering pattern detected");
+      intentOverride = "Likely social engineering attempt — the message uses authority impersonation, urgency, or sensitive data request patterns.";
     } else if (socialEngFlags === 1) {
-      // Single signal → moderate concern
+      // Single signal → moderate concern (don't override intent for borderline cases)
       floorScore = Math.max(floorScore, 4);
       flags.push("Potential social engineering indicator");
     }
   }
 
-  return { floorScore, flags };
+  return { floorScore, flags, intentOverride };
 }
 
 /** Custom task type definition for dynamic prompt injection. */
@@ -299,8 +311,8 @@ export async function runConsolidatedAnalysis(
   customTaskTypes?: CustomTaskType[],
   conversationHistory?: Array<{role: string; content: string}>
 ): Promise<ConsolidatedAnalysisResult> {
-  // Step 1: Security pre-check
-  const { floorScore, flags } = securityPreCheck(message);
+  // Step 1: Security pre-check (regex — instant, not manipulable by injection)
+  const { floorScore, flags, intentOverride } = securityPreCheck(message);
 
   try {
     // Step 2: Single LLM call (with custom types injected into prompt)
@@ -329,8 +341,15 @@ export async function runConsolidatedAnalysis(
           : flagNote;
     }
 
+    // Step 6: Override intent when regex pre-check confirms a critical threat.
+    // The LLM's intent output cannot be trusted when it has been manipulated
+    // by the very injection it's supposed to classify (e.g., "ignore all
+    // previous instructions" causes the LLM to fabricate a benign intent).
+    const finalIntent = intentOverride ?? result.intent;
+
     return {
       ...result,
+      intent: finalIntent,
       securityScore: Math.min(finalSecurityScore, 10),
       securityExplanation: finalSecurityExplanation,
     };
@@ -353,7 +372,7 @@ export async function runConsolidatedAnalysis(
       "Consolidated analysis failed, falling back to individual calls:",
       error.message
     );
-    return runFallbackAnalysis(message, model, apiKey, floorScore, flags);
+    return runFallbackAnalysis(message, model, apiKey, floorScore, flags, intentOverride);
   }
 }
 
@@ -366,7 +385,8 @@ async function runFallbackAnalysis(
   model: ModelOption,
   apiKey: string,
   securityFloorScore: number,
-  securityFlags: string[]
+  securityFlags: string[],
+  intentOverride?: string
 ): Promise<ConsolidatedAnalysisResult> {
   const [intentResult, sentimentResult, styleResult] = await Promise.all([
     analyzeIntent(message, model, apiKey).catch(() => ({ intent: "general" })),
@@ -437,7 +457,7 @@ async function runFallbackAnalysis(
   const conversationTitle = titleWords.length > 30 ? titleWords.substring(0, 27) + "..." : titleWords;
 
   return {
-    intent: intentResult.intent,
+    intent: intentOverride ?? intentResult.intent,
     conversationTitle,
     sentiment: (
       ["positive", "neutral", "negative"].includes(sentimentResult.sentiment)
