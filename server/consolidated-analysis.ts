@@ -105,8 +105,8 @@ function securityPreCheck(message: string): {
 
   for (const pattern of criticalPatterns) {
     if (pattern.test(message)) {
-      // Direct prompt injection commands are unambiguously malicious — score 9-10
-      floorScore = Math.max(floorScore, 9);
+      // Direct prompt injection commands are unambiguously malicious — max score
+      floorScore = 10;
       flags.push("Critical threat pattern detected");
       // The LLM cannot be trusted here — the injection may have manipulated its output
       intentOverride = "Direct prompt injection attempt — the user is trying to override system instructions, extract internal configuration, or bypass safety controls.";
@@ -114,7 +114,7 @@ function securityPreCheck(message: string): {
     }
   }
 
-  if (floorScore < 9) {
+  if (floorScore < 10) {
     for (const pattern of exploitationPatterns) {
       if (pattern.test(message)) {
         floorScore = Math.max(floorScore, 7);

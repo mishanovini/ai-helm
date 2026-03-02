@@ -55,6 +55,19 @@ import { cn } from "@/lib/utils";
 
 const CHART_COLORS = ["#3b82f6", "#22c55e", "#f97316", "#ef4444", "#a855f7", "#eab308", "#06b6d4", "#ec4899", "#6366f1"];
 
+/**
+ * Build a stable model→color mapping from the full model list.
+ * Ensures both Usage and Cost pie charts use the same color per model,
+ * even when the Cost chart filters out zero-cost entries.
+ */
+function buildModelColorMap(models: Array<{ model: string }>): Record<string, string> {
+  const map: Record<string, string> = {};
+  models.forEach((m, i) => {
+    map[m.model] = CHART_COLORS[i % CHART_COLORS.length];
+  });
+  return map;
+}
+
 /** Session storage key for admin secret (cleared when browser tab closes) */
 const ADMIN_SECRET_KEY = "admin_secret";
 
@@ -373,75 +386,81 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
             <UsersNeedingAttention users={users} />
 
             {/* Model Usage & Cost Distribution Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Model Usage Distribution */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Model Usage Distribution</CardTitle>
-                  <CardDescription>Request count per model</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {modelUsage && modelUsage.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={280}>
-                      <PieChart>
-                        <Pie
-                          data={modelUsage}
-                          dataKey="count"
-                          nameKey="model"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={100}
-                          label={({ model, count }) => `${model}: ${count}`}
-                        >
-                          {modelUsage.map((_: any, i: number) => (
-                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <p className="text-sm text-muted-foreground text-center py-8">
-                      No model usage data yet.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+            {(() => {
+              // Stable model→color mapping so both charts use the same color per model
+              const colorMap = modelUsage ? buildModelColorMap(modelUsage) : {};
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Model Usage Distribution */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Model Usage Distribution</CardTitle>
+                      <CardDescription>Request count per model</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {modelUsage && modelUsage.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={280}>
+                          <PieChart>
+                            <Pie
+                              data={modelUsage}
+                              dataKey="count"
+                              nameKey="model"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={100}
+                              label={({ model, count }) => `${model}: ${count}`}
+                            >
+                              {modelUsage.map((m: any, i: number) => (
+                                <Cell key={i} fill={colorMap[m.model] || CHART_COLORS[i % CHART_COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                          No model usage data yet.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
 
-              {/* Model Cost Distribution */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Model Cost Distribution</CardTitle>
-                  <CardDescription>Estimated cost per model</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {modelUsage && modelUsage.some((m: any) => m.totalCost > 0) ? (
-                    <ResponsiveContainer width="100%" height={280}>
-                      <PieChart>
-                        <Pie
-                          data={modelUsage.filter((m: any) => m.totalCost > 0)}
-                          dataKey="totalCost"
-                          nameKey="model"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={100}
-                          label={({ model, totalCost }) => `${model}: $${Number(totalCost).toFixed(4)}`}
-                        >
-                          {modelUsage.filter((m: any) => m.totalCost > 0).map((_: any, i: number) => (
-                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value: number) => `$${value.toFixed(6)}`} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <p className="text-sm text-muted-foreground text-center py-8">
-                      No cost data yet.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                  {/* Model Cost Distribution */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Model Cost Distribution</CardTitle>
+                      <CardDescription>Estimated cost per model</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {modelUsage && modelUsage.some((m: any) => m.totalCost > 0) ? (
+                        <ResponsiveContainer width="100%" height={280}>
+                          <PieChart>
+                            <Pie
+                              data={modelUsage.filter((m: any) => m.totalCost > 0)}
+                              dataKey="totalCost"
+                              nameKey="model"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={100}
+                              label={({ model, totalCost }) => `${model}: $${Number(totalCost).toFixed(4)}`}
+                            >
+                              {modelUsage.filter((m: any) => m.totalCost > 0).map((m: any, i: number) => (
+                                <Cell key={i} fill={colorMap[m.model] || CHART_COLORS[i % CHART_COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value: number) => `$${value.toFixed(6)}`} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                          No cost data yet.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              );
+            })()}
 
             {/* Cost Analysis (enhanced with demo/real split) */}
             <CostAnalysis users={users} overview={overview} modelUsage={modelUsage} />
@@ -1228,10 +1247,32 @@ const PHASE_LABELS: Record<string, string> = {
   dlpScanMs: "DLP Scan",
   analysisMs: "AI Analysis",
   modelSelectionMs: "Model Selection",
-  promptOptMs: "Prompt Optimization",
-  paramTuningMs: "Parameter Tuning",
-  systemContextMs: "System Context",
-  generationMs: "Response Generation",
+  promptOptMs: "Prompt Opt",
+  paramTuningMs: "Param Tuning",
+  systemContextMs: "Sys Context",
+  generationMs: "Generation",
+};
+
+/** Pipeline execution order — vertical bars will appear left-to-right in this sequence */
+const PHASE_ORDER = [
+  "dlpScanMs",
+  "analysisMs",
+  "modelSelectionMs",
+  "promptOptMs",
+  "paramTuningMs",
+  "systemContextMs",
+  "generationMs",
+];
+
+/** Distinct colors for each pipeline phase (matches execution order) */
+const PHASE_COLORS: Record<string, string> = {
+  dlpScanMs: "#6366f1",       // indigo
+  analysisMs: "#22c55e",      // green
+  modelSelectionMs: "#3b82f6", // blue
+  promptOptMs: "#f97316",     // orange
+  paramTuningMs: "#ef4444",   // red
+  systemContextMs: "#64748b", // slate
+  generationMs: "#a855f7",    // purple
 };
 
 function ModelPerformance({
@@ -1312,7 +1353,7 @@ function ModelPerformance({
           </TableBody>
         </Table>
 
-        {/* Phase Timing Breakdown */}
+        {/* Phase Timing Breakdown — vertical bar chart in pipeline execution order */}
         {phaseTimings && phaseTimings.length > 0 && (
           <div className="border-t pt-4">
             <p className="text-sm font-medium mb-3 flex items-center gap-2">
@@ -1320,37 +1361,57 @@ function ModelPerformance({
               Average Pipeline Phase Breakdown
             </p>
             <p className="text-xs text-muted-foreground mb-3">
-              Where time is spent in the analysis pipeline (averaged over recent requests)
+              Phases shown left-to-right in execution order (averaged over recent requests)
             </p>
-            <div className="space-y-2">
-              {(() => {
-                const totalMs = phaseTimings.reduce((sum: number, p: any) => sum + p.avgMs, 0);
-                return phaseTimings.map((p: any, i: number) => {
-                  const pct = totalMs > 0 ? (p.avgMs / totalMs) * 100 : 0;
-                  const label = PHASE_LABELS[p.phase] || p.phase;
-                  return (
-                    <div key={p.phase} className="flex items-center gap-3">
-                      <span className="text-xs w-36 shrink-0 text-muted-foreground">{label}</span>
-                      <div className="flex-1 bg-muted rounded-full h-3 relative overflow-hidden">
-                        <div
-                          className="h-3 rounded-full transition-all"
-                          style={{
-                            width: `${pct}%`,
-                            backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-                          }}
-                        />
-                      </div>
-                      <span className="text-xs font-medium w-16 text-right">
-                        {p.avgMs >= 1000 ? `${(p.avgMs / 1000).toFixed(1)}s` : `${p.avgMs}ms`}
-                      </span>
-                      <span className="text-xs text-muted-foreground w-10 text-right">
-                        {pct.toFixed(0)}%
-                      </span>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
+            {(() => {
+              // Sort phases into pipeline execution order
+              const phaseMap = new Map(phaseTimings.map((p: any) => [p.phase, p.avgMs]));
+              const orderedData = PHASE_ORDER
+                .filter(phase => phaseMap.has(phase))
+                .map(phase => ({
+                  phase,
+                  label: PHASE_LABELS[phase] || phase,
+                  avgMs: phaseMap.get(phase) || 0,
+                  color: PHASE_COLORS[phase] || "#94a3b8",
+                }));
+
+              return (
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={orderedData} margin={{ top: 8, right: 8, bottom: 4, left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      interval={0}
+                      angle={-20}
+                      textAnchor="end"
+                      height={50}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${v}ms`}
+                      width={50}
+                    />
+                    <Tooltip
+                      formatter={(value: number) => [
+                        value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`,
+                        "Avg Time",
+                      ]}
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: 8,
+                      }}
+                    />
+                    <Bar dataKey="avgMs" radius={[4, 4, 0, 0]}>
+                      {orderedData.map((entry, i) => (
+                        <Cell key={i} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              );
+            })()}
           </div>
         )}
       </CardContent>
@@ -1624,6 +1685,7 @@ function ApiKeysTab({ apiKeys }: { apiKeys: any[] | undefined }) {
 
 function SettingsTab() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [securityThreshold, setSecurityThreshold] = useState(8);
   const [hasChanges, setHasChanges] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -1665,6 +1727,7 @@ function SettingsTab() {
     },
     onSuccess: () => {
       setHasChanges(false);
+      queryClient.invalidateQueries({ queryKey: ["adminSettings"] });
       toast({ title: "Settings saved" });
     },
     onError: () => {
