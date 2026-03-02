@@ -72,6 +72,7 @@ export interface IStorage {
   searchConversations(userId: string, query: string): Promise<Conversation[]>;
   createConversation(conv: InsertConversation): Promise<Conversation>;
   updateConversationTitle(id: string, title: string): Promise<Conversation | undefined>;
+  updateConversationAnalysis(id: string, analysis: Record<string, unknown>): Promise<void>;
   deleteConversation(id: string): Promise<void>;
 
   // Messages
@@ -354,6 +355,14 @@ export class DatabaseStorage implements IStorage {
       .where(eq(conversations.id, id))
       .returning();
     return updated;
+  }
+
+  /** Persist the most recent analysis data snapshot on a conversation */
+  async updateConversationAnalysis(id: string, analysis: Record<string, unknown>): Promise<void> {
+    await this.db
+      .update(conversations)
+      .set({ lastAnalysis: analysis, updatedAt: new Date() })
+      .where(eq(conversations.id, id));
   }
 
   async deleteConversation(id: string): Promise<void> {

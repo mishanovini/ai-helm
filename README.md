@@ -24,7 +24,7 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 **Provider Health Monitoring** - Real-time operational status of OpenAI, Anthropic, and Google Gemini fetched from their public status APIs. Displayed in the admin Health tab and as inline status indicators on the Settings page. Cached for 5 minutes with auto-refresh.
 
-**Conversation Persistence** - Full conversation history with search, sidebar navigation, and WebSocket message saving.
+**Conversation Persistence** - Full conversation history with search, sidebar navigation, and WebSocket message saving. Analysis data from the most recent prompt is persisted per conversation and restored when revisiting, so the analysis panel always reflects the last interaction.
 
 **Progress Tracking** - Per-user prompt quality sparkline, trend indicators, lesson completion, and model usage stats visible in header and settings.
 
@@ -251,7 +251,7 @@ See the [Demo Mode](#demo-mode) section below for details.
 - `POST /api/conversations` - Create conversation
 - `GET /api/conversations` - List conversations
 - `GET /api/conversations/search?q=` - Search conversations
-- `GET /api/conversations/:id/messages` - Get messages
+- `GET /api/conversations/:id/messages` - Get messages + lastAnalysis
 - `DELETE /api/conversations/:id` - Delete conversation
 
 ### Router Configuration

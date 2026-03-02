@@ -284,6 +284,19 @@ export async function runAnalysisJob(
             const title = analysis.conversationTitle || analysis.intent.substring(0, 40);
             await storage.updateConversationTitle(job.conversationId, title);
           }
+
+          // Persist analysis snapshot so the panel is populated on revisit
+          await storage.updateConversationAnalysis(job.conversationId, {
+            intent: analysis.intent,
+            sentiment: analysis.sentiment,
+            sentimentDetail: analysis.sentimentDetail,
+            style: analysis.style,
+            securityScore: analysis.securityScore,
+            securityExplanation: analysis.securityExplanation,
+            securityHalted: true,
+            securityThreshold,
+            promptQuality: analysis.promptQuality,
+          });
         } catch {
           // Non-critical: persistence failure doesn't block the pipeline
         }
@@ -629,6 +642,28 @@ export async function runAnalysisJob(
           const title = analysis.conversationTitle || analysis.intent.substring(0, 40);
           await storage.updateConversationTitle(job.conversationId, title);
         }
+
+        // Persist full analysis snapshot so the panel is populated on revisit
+        await storage.updateConversationAnalysis(job.conversationId, {
+          intent: analysis.intent,
+          sentiment: analysis.sentiment,
+          sentimentDetail: analysis.sentimentDetail,
+          style: analysis.style,
+          securityScore: analysis.securityScore,
+          securityExplanation: analysis.securityExplanation,
+          selectedModel: results.selectedModel?.model,
+          modelDisplayName: results.selectedModel?.displayName,
+          modelProvider: results.selectedModel?.provider,
+          reasoning: results.modelReasoning,
+          fallbackModel: results.fallbackModel?.displayName || null,
+          estimatedCost: results.estimatedCost?.displayText,
+          costBreakdown: results.estimatedCost
+            ? { input: Math.ceil(results.optimizedPrompt.length / 4), output: 500, total: results.estimatedCost.displayText }
+            : undefined,
+          optimizedPrompt: results.optimizedPrompt,
+          parameters: results.parameters,
+          promptQuality: analysis.promptQuality,
+        });
       } catch {
         // Non-critical
       }

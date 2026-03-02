@@ -128,6 +128,8 @@ export const conversations = pgTable("conversations", {
   presetId: varchar("preset_id").references(() => promptTemplates.id),
   /** Active system prompt for this conversation (Phase D — injected into LLM calls) */
   systemPrompt: text("system_prompt"),
+  /** Persisted analysis data from the most recent prompt in this conversation */
+  lastAnalysis: jsonb("last_analysis").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

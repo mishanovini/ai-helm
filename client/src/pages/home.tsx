@@ -352,6 +352,8 @@ export default function Home() {
         setIsProcessing(false);
         setIsGenerating(false);
         setActiveJobId(null);
+        // Refresh sidebar — title may have been set server-side (e.g. security halt)
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
       }
     }
   }, [conversationId, queryClient]);
@@ -519,10 +521,12 @@ export default function Home() {
     try {
       const res = await fetch(`/api/conversations/${id}/messages`);
       if (res.ok) {
-        const dbMessages = await res.json();
+        const data = await res.json();
+        // API returns { messages, lastAnalysis } — load both
+        const dbMessages = data.messages || data; // Backwards-compat with plain array
         setMessages(dbMessages.map((m: any) => ({
           id: m.id,
-          role: m.role as "user" | "assistant",
+          role: m.role as "user" | "assistant" | "system",
           content: m.content,
           timestamp: new Date(m.createdAt).toLocaleTimeString('en-US', {
             hour: 'numeric',
@@ -530,6 +534,11 @@ export default function Home() {
             hour12: true
           }),
         })));
+
+        // Restore the analysis panel from persisted data
+        if (data.lastAnalysis) {
+          setAnalysisData(data.lastAnalysis as AnalysisData);
+        }
       }
     } catch (err) {
       console.error("Failed to load conversation messages:", err);

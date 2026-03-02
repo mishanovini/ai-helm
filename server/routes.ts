@@ -372,7 +372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get messages for a conversation
+  // Get messages for a conversation (includes lastAnalysis in response header)
   app.get("/api/conversations/:id/messages", requireAuth, async (req, res) => {
     try {
       const userId = await resolveUserId(req);
@@ -385,7 +385,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const msgs = await storage.listMessagesByConversation(req.params.id);
-      res.json(msgs);
+      // Return messages + persisted analysis data in a single response
+      res.json({
+        messages: msgs,
+        lastAnalysis: conversation.lastAnalysis || null,
+      });
     } catch (error: any) {
       console.error("Get messages error:", error);
       res.status(500).json({ error: "Failed to get messages" });
