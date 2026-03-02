@@ -331,23 +331,34 @@ export async function runConsolidatedAnalysis(
     const result = consolidatedSchema.parse(parsed);
 
     // Step 5: Apply security floor score
-    let finalSecurityScore = Math.max(result.securityScore, floorScore);
-    let finalSecurityExplanation = result.securityExplanation;
-    if (flags.length > 0 && finalSecurityScore > result.securityScore) {
+    const finalSecurityScore = Math.max(result.securityScore, floorScore);
+
+    // Step 6: Build security explanation.
+    // When intentOverride is set, the LLM's securityExplanation is also
+    // untrustworthy (the injection manipulates ALL of the LLM's output fields,
+    // not just intent). Use a hardcoded explanation based on the detected category.
+    let finalSecurityExplanation: string;
+    if (intentOverride) {
+      // Fully replace — don't mix fabricated LLM output with real detection flags
+      finalSecurityExplanation = `${flags.join(". ")}. ${intentOverride}`;
+    } else if (flags.length > 0 && finalSecurityScore > result.securityScore) {
+      // Floor score raised by regex but no full override — append detection note
       const flagNote = `Detected: ${flags.join(", ")}`;
       finalSecurityExplanation =
         result.securityExplanation !== "No significant security concerns"
           ? `${result.securityExplanation}. ${flagNote}`
           : flagNote;
+    } else {
+      finalSecurityExplanation = result.securityExplanation;
     }
 
-    // Step 6: Override intent when regex pre-check confirms a critical threat.
+    // Step 7: Override intent when regex pre-check confirms a critical threat.
     // The LLM's intent output cannot be trusted when it has been manipulated
     // by the very injection it's supposed to classify (e.g., "ignore all
     // previous instructions" causes the LLM to fabricate a benign intent).
     const finalIntent = intentOverride ?? result.intent;
 
-    // Step 7: Override conversation title when intent is overridden.
+    // Step 8: Override conversation title when intent is overridden.
     // The LLM fabricates benign titles ("Cloud Types Explained") for injections.
     const finalTitle = intentOverride
       ? "Security Blocked Request"
@@ -420,11 +431,16 @@ async function runFallbackAnalysis(
     };
   });
 
-  // Apply floor score
+  // Apply floor score and override explanation when threat confirmed by regex
   const finalSecurityScore = Math.max(securityResult.score, securityFloorScore);
-  let finalExplanation = securityResult.explanation;
-  if (securityFlags.length > 0 && finalSecurityScore > securityResult.score) {
+  let finalExplanation: string;
+  if (intentOverride) {
+    // Fully replace — LLM explanation is untrustworthy when injection detected
+    finalExplanation = `${securityFlags.join(". ")}. ${intentOverride}`;
+  } else if (securityFlags.length > 0 && finalSecurityScore > securityResult.score) {
     finalExplanation = `${securityResult.explanation}. Detected: ${securityFlags.join(", ")}`;
+  } else {
+    finalExplanation = securityResult.explanation;
   }
 
   // Estimate task type and complexity from the message

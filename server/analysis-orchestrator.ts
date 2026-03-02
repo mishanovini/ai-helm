@@ -267,7 +267,9 @@ export async function runAnalysisJob(
       }
 
       // Persist the security block as a system message so it's visible when
-      // the user revisits this conversation later
+      // the user revisits this conversation later.
+      // Use the analysis explanation (which has been regex-overridden for confirmed
+      // threats, so it won't contain fabricated LLM output).
       const blockMessage = `Request blocked: security score ${analysis.securityScore}/10 exceeds threshold ${securityThreshold}. ${analysis.securityExplanation || "Contact your admin if you believe this is an error."}`;
 
       if (job.userId && job.conversationId) {
