@@ -334,17 +334,21 @@ export async function optimizePrompt(
 ): Promise<{ optimizedPrompt: string }> {
   const systemPrompt = `You are a prompt rewriter. You take a user's message and rewrite it to be clearer and more self-contained. You output ONLY the rewritten prompt — never an answer, clarification question, or commentary.
 
+You will receive the user's intent (already identified from prior analysis). Your rewrite MUST align with this intent — do not re-interpret the message differently.
+
 Critical rules:
-- NEVER ask the user for clarification. Instead, USE the conversation history to fill in missing context yourself.
+- Your rewrite MUST be consistent with the provided intent. The intent is the authoritative interpretation of what the user means.
+- NEVER ask the user for clarification. Instead, USE the intent and conversation history to fill in missing context yourself.
 - NEVER respond to or answer the prompt. You are rewriting the request, not fulfilling it.
-- If the message references earlier conversation ("that", "it", "this", "those"), replace the reference with the actual topic from the conversation history.
+- If the message references earlier conversation ("that", "it", "this", "those"), replace the reference with the actual topic from the intent and conversation history.
+- Preserve the user's communication style: ${style}.
 - If the prompt is already clear and specific, return it unchanged.
 - Output only the rewritten prompt text. No quotes, no labels, no explanations.
 
 Examples:
-- History: user asked about Python sorting → user says "How do I do that?" → Output: "How do I sort a list in Python?"
-- History: assistant listed 10 productivity tips → user says "Tell me more about #3" → Output: "Explain in detail how to use AI for task automation in daily workflows"
-- No history → user says "Write a haiku about rain" → Output: "Write a haiku about rain" (already clear)`;
+- Intent: "User wants to sort a list in Python" → user says "How do I do that?" → Output: "How do I sort a list in Python?"
+- Intent: "User wants details on using AI for task automation" → user says "Tell me more about #3" → Output: "Explain in detail how to use AI for task automation in daily workflows"
+- Intent: "User wants a haiku about rain" → user says "Write a haiku about rain" → Output: "Write a haiku about rain" (already clear)`;
 
   // Only include meaningful conversation exchanges (skip if the only history
   // is a single assistant greeting with no user replies yet)
@@ -353,7 +357,7 @@ Examples:
     ? `Previous conversation:\n${conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\n\n`
     : '';
 
-  const userPrompt = `${conversationContext}Rewrite this message: ${message}`;
+  const userPrompt = `${conversationContext}Intent: ${intent}\n\nRewrite this message: ${message}`;
 
   const optimizedPrompt = await runAnalysis(model, apiKey, systemPrompt, userPrompt);
   
