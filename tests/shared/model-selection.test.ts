@@ -9,7 +9,26 @@ import {
   getProviderStatus,
   type AvailableProviders,
   type ModelOption,
+  type LLMAnalysisOverride,
 } from "../../shared/model-selection";
+
+// ---------------------------------------------------------------------------
+// Test helper: build a full LLMAnalysisOverride with sensible defaults
+// ---------------------------------------------------------------------------
+
+function makeLLMOverride(overrides?: Partial<LLMAnalysisOverride>): LLMAnalysisOverride {
+  return {
+    taskType: "general",
+    complexity: "simple",
+    isSpeedCritical: false,
+    isSimpleTask: true,
+    requiresDeepReasoning: false,
+    requiresMultimodal: false,
+    isSubstantiveCreative: false,
+    useDeepResearch: false,
+    ...overrides,
+  };
+}
 
 // ============================================================================
 // MODEL_CATALOG integrity
@@ -117,7 +136,7 @@ describe("analyzePrompt", () => {
 });
 
 // ============================================================================
-// selectOptimalModel
+// selectOptimalModel (keyword fallback — no LLM override)
 // ============================================================================
 
 describe("selectOptimalModel", () => {
@@ -191,6 +210,159 @@ describe("selectOptimalModel", () => {
   it("should throw for large context when Gemini not available", () => {
     const longPrompt = "x".repeat(900000);
     expect(() => selectOptimalModel(longPrompt, openaiOnly)).toThrow("Prompt too large");
+  });
+});
+
+// ============================================================================
+// selectOptimalModel with LLM override
+// ============================================================================
+
+describe("selectOptimalModel with LLM override", () => {
+  const allProviders: AvailableProviders = { gemini: true, openai: true, anthropic: true };
+
+  it("should prevent false speed-critical from keywords when LLM says not speed-critical", () => {
+    // Message contains "quick" but LLM correctly identifies it as a creative task
+    const result = selectOptimalModel(
+      "write me a quick poem about the ocean",
+      allProviders,
+      makeLLMOverride({
+        taskType: "creative",
+        isSpeedCritical: false,
+        isSimpleTask: false,
+        isSubstantiveCreative: true,
+      }),
+    );
+    // Should route to a creative model, NOT a speed-optimized lightweight one
+    expect(result.reasoning.toLowerCase()).not.toContain("speed");
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
+  });
+
+  it("should route substantive creative tasks to premium models via LLM override", () => {
+    const result = selectOptimalModel(
+      "Can you write a story about a robot?",
+      allProviders,
+      makeLLMOverride({
+        taskType: "creative",
+        isSubstantiveCreative: true,
+        isSimpleTask: false,
+      }),
+    );
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
+    expect(result.reasoning.toLowerCase()).toContain("creative");
+  });
+
+  it("should route to lightweight model when LLM says task is simple", () => {
+    // Even with a longer message, LLM says it's simple
+    const result = selectOptimalModel(
+      "What is the capital of France?",
+      allProviders,
+      makeLLMOverride({
+        taskType: "general",
+        isSimpleTask: true,
+        isSpeedCritical: false,
+      }),
+    );
+    expect(["ultra-low", "low"]).toContain(result.primary.costTier);
+  });
+
+  it("should route to premium model when LLM detects deep reasoning", () => {
+    const result = selectOptimalModel(
+      "Explain quantum entanglement",
+      allProviders,
+      makeLLMOverride({
+        taskType: "analysis",
+        complexity: "complex",
+        requiresDeepReasoning: true,
+        isSimpleTask: false,
+      }),
+    );
+    // Should either match analysis step or deep reasoning step — both use premium models
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
+  });
+
+  it("should use speed-critical routing only when LLM confirms speed is the priority", () => {
+    const result = selectOptimalModel(
+      "I need an answer right now ASAP",
+      allProviders,
+      makeLLMOverride({
+        taskType: "general",
+        isSpeedCritical: true,
+        isSimpleTask: false,
+      }),
+    );
+    expect(result.reasoning.toLowerCase()).toContain("speed");
+  });
+
+  it("should not trigger speed-critical when LLM says false even with speed keywords", () => {
+    // Message has "fast" but LLM says it's not speed-critical
+    const result = selectOptimalModel(
+      "How fast is the speed of light in a vacuum?",
+      allProviders,
+      makeLLMOverride({
+        taskType: "general",
+        isSpeedCritical: false,
+        isSimpleTask: true,
+      }),
+    );
+    expect(result.reasoning.toLowerCase()).not.toContain("speed-critical");
+  });
+});
+
+// ============================================================================
+// selectOptimalModel with deep research
+// ============================================================================
+
+describe("selectOptimalModel with deep research", () => {
+  const allProviders: AvailableProviders = { gemini: true, openai: true, anthropic: true };
+
+  it("should route to premium models when LLM recommends deep research", () => {
+    const result = selectOptimalModel(
+      "Compare the economic policies of the last 5 presidents",
+      allProviders,
+      makeLLMOverride({
+        taskType: "analysis",
+        useDeepResearch: true,
+        isSimpleTask: false,
+      }),
+    );
+    expect(result.reasoning.toLowerCase()).toContain("deep research");
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
+  });
+
+  it("should route to premium models when external deep research flag is set", () => {
+    // Even without LLM recommending it, external flag forces deep research
+    const result = selectOptimalModel(
+      "Tell me about machine learning",
+      allProviders,
+      makeLLMOverride({ taskType: "general", isSimpleTask: true }),
+      true, // external useDeepResearch flag
+    );
+    expect(result.reasoning.toLowerCase()).toContain("deep research");
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
+  });
+
+  it("should prioritize deep research over lightweight model routing", () => {
+    // Task is simple but deep research is requested — should NOT route to lightweight
+    const result = selectOptimalModel(
+      "What is photosynthesis?",
+      allProviders,
+      makeLLMOverride({
+        taskType: "general",
+        isSimpleTask: true,
+        useDeepResearch: true,
+      }),
+    );
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
+  });
+
+  it("should not trigger deep research when neither LLM nor external flag sets it", () => {
+    const result = selectOptimalModel(
+      "Hello there!",
+      allProviders,
+      makeLLMOverride({ taskType: "general", isSimpleTask: true }),
+      false,
+    );
+    expect(result.reasoning.toLowerCase()).not.toContain("deep research");
   });
 });
 
@@ -302,7 +474,7 @@ describe("selectOptimalModel with custom taskTypes", () => {
     const result = selectOptimalModel(
       "Help me with customer support",
       allProviders,
-      { taskType: "customer-support", complexity: "moderate" }
+      makeLLMOverride({ taskType: "customer-support", complexity: "moderate" }),
     );
     expect(result.primary).toBeDefined();
     expect(result.reasoning).toBeDefined();
@@ -312,7 +484,7 @@ describe("selectOptimalModel with custom taskTypes", () => {
     const result = selectOptimalModel(
       "Research legal precedents for intellectual property case involving software patents. Analyze multiple jurisdictions.",
       allProviders,
-      { taskType: "legal-research", complexity: "complex" }
+      makeLLMOverride({ taskType: "legal-research", complexity: "complex" }),
     );
     // Custom types should still get a valid model (deep reasoning or default fallback)
     expect(result.primary).toBeDefined();
@@ -323,7 +495,7 @@ describe("selectOptimalModel with custom taskTypes", () => {
     const result = selectOptimalModel(
       "test message",
       allProviders,
-      { taskType: "", complexity: "simple" }
+      makeLLMOverride({ taskType: "", complexity: "simple" }),
     );
     expect(result.primary).toBeDefined();
   });

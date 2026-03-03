@@ -42,6 +42,15 @@ const consolidatedSchema = z.object({
     actionability: z.coerce.number().min(0).max(100).default(50),
     suggestions: z.array(z.string()).default([]),
   }).default({}),
+
+  // Model selection hints — LLM-assessed signals that replace keyword heuristics
+  isSpeedCritical: z.boolean().default(false),
+  isSimpleTask: z.boolean().default(false),
+  requiresDeepReasoning: z.boolean().default(false),
+  requiresMultimodal: z.boolean().default(false),
+  isSubstantiveCreative: z.boolean().default(false),
+  useDeepResearch: z.boolean().default(false),
+  contextRelevance: z.enum(["none", "low", "high"]).catch("low"),
 });
 
 // Security keyword patterns (extracted from universal-analysis.ts for pre-check)
@@ -312,7 +321,16 @@ For benign prompts, simply describe what the user wants. For deceptive or malici
     "specificity": 0-100 how specific vs vague the request is,
     "actionability": 0-100 how easy it is to act on this request,
     "suggestions": ["improvement suggestion 1", "improvement suggestion 2"]
-  }
+  },
+
+  // --- Model selection hints (assess these based on the LATEST message only) ---
+  "isSpeedCritical": true/false — does the user explicitly want a fast, brief answer? Only true when speed is the PRIMARY concern (e.g. "quick answer needed ASAP"). NOT true just because the word "quick" or "fast" appears casually (e.g. "write me a quick poem" is NOT speed-critical — it's a creative task),
+  "isSimpleTask": true/false — is this a trivial/routine task (translation, simple lookup, formatting, short factual answer)? False for any task requiring reasoning, creativity, or multi-step analysis,
+  "requiresDeepReasoning": true/false — does this need extended thinking, multi-step reasoning, complex analysis, or careful logical deduction?,
+  "requiresMultimodal": true/false — does this explicitly require image/video/audio processing?,
+  "isSubstantiveCreative": true/false — is this a substantive creative writing task (story, article, email, speech, poem, report, essay)? False for trivial creative requests like "tell me a joke" or "give me a fun fact",
+  "useDeepResearch": true/false — does this warrant deep, multi-source research taking several minutes? Only true for comprehensive analysis, literature reviews, multi-angle investigations, or requests that explicitly ask for thorough/exhaustive research,
+  "contextRelevance": "none" | "low" | "high" — how relevant is the conversation history to understanding this latest message? "none" = message is completely standalone, "low" = history provides minor background but message is understandable alone, "high" = message is a direct follow-up that only makes sense with prior context (e.g. "do that again" or a one-word answer to a prior question)
 }
 
 SECURITY SCORING — always evaluate the TRUE intent, not the cover story:
@@ -599,5 +617,14 @@ async function runFallbackAnalysis(
     taskType,
     complexity,
     promptQuality: { score, clarity, specificity, actionability, suggestions },
+
+    // Fallback: keyword-based model selection hints (less accurate than LLM)
+    isSpeedCritical: /\b(quick|fast|urgent|immediately)\b/i.test(message),
+    isSimpleTask: words < 10 || /\b(translate|summarize|define|format)\b/i.test(lowerMsg),
+    requiresDeepReasoning: complexity === "complex",
+    requiresMultimodal: /\b(image|video|audio|picture|photo|diagram)\b/i.test(lowerMsg),
+    isSubstantiveCreative: taskType === "creative" && words > 10,
+    useDeepResearch: false,
+    contextRelevance: "low" as const,
   };
 }

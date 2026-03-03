@@ -28,6 +28,14 @@ const consolidatedSchema = z.object({
     actionability: z.number().min(0).max(100),
     suggestions: z.array(z.string()),
   }),
+  // Model selection hints
+  isSpeedCritical: z.boolean(),
+  isSimpleTask: z.boolean(),
+  requiresDeepReasoning: z.boolean(),
+  requiresMultimodal: z.boolean(),
+  isSubstantiveCreative: z.boolean(),
+  useDeepResearch: z.boolean(),
+  contextRelevance: z.enum(["none", "low", "high"]),
 });
 
 // Security regex patterns (copied from consolidated-analysis.ts)
@@ -112,6 +120,13 @@ describe("Consolidated analysis schema validation", () => {
       actionability: 75,
       suggestions: ["Specify the programming language", "Mention the input data format"],
     },
+    isSpeedCritical: false,
+    isSimpleTask: false,
+    requiresDeepReasoning: false,
+    requiresMultimodal: false,
+    isSubstantiveCreative: false,
+    useDeepResearch: false,
+    contextRelevance: "none" as const,
   };
 
   it("should validate a correct analysis result", () => {
@@ -187,6 +202,34 @@ describe("Consolidated analysis schema validation", () => {
       promptQuality: { ...validResult.promptQuality, suggestions: [] },
     });
     expect(result.success).toBe(true);
+  });
+
+  it("should accept valid model selection hint booleans", () => {
+    const result = consolidatedSchema.safeParse({
+      ...validResult,
+      isSpeedCritical: true,
+      isSimpleTask: false,
+      requiresDeepReasoning: true,
+      requiresMultimodal: false,
+      isSubstantiveCreative: true,
+      useDeepResearch: false,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("should accept all valid contextRelevance values", () => {
+    for (const value of ["none", "low", "high"] as const) {
+      const result = consolidatedSchema.safeParse({ ...validResult, contextRelevance: value });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("should reject invalid contextRelevance values", () => {
+    const result = consolidatedSchema.safeParse({
+      ...validResult,
+      contextRelevance: "medium",
+    });
+    expect(result.success).toBe(false);
   });
 });
 

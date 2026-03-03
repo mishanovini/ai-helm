@@ -62,6 +62,23 @@ export interface ConsolidatedAnalysisResult {
   taskType: string;
   complexity: "simple" | "moderate" | "complex";
   promptQuality: PromptQuality;
+
+  // --- Model selection hints (LLM-assessed) ---
+
+  /** Does the user explicitly want a fast, brief answer? */
+  isSpeedCritical: boolean;
+  /** Is this a trivial/routine task (translation, simple lookup, formatting)? */
+  isSimpleTask: boolean;
+  /** Does this need extended thinking, multi-step reasoning, or complex analysis? */
+  requiresDeepReasoning: boolean;
+  /** Does this require image/video/audio processing? */
+  requiresMultimodal: boolean;
+  /** Is this substantive creative writing (story, article, email, speech) — not just "tell me a joke"? */
+  isSubstantiveCreative: boolean;
+  /** Does this warrant deep, multi-source research taking several minutes? */
+  useDeepResearch: boolean;
+  /** How relevant is conversation history to interpreting this latest message? */
+  contextRelevance: "none" | "low" | "high";
 }
 
 export interface RouterRule {

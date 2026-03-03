@@ -158,41 +158,67 @@ export function analyzePrompt(prompt: string): PromptAnalysis {
 // ---------------------------------------------------------------------------
 
 /**
- * Pre-computed analysis from an LLM (consolidated analysis) that can override
+ * Pre-computed analysis from an LLM (consolidated analysis) that overrides
  * the keyword-based heuristic in `analyzePrompt()`.
+ *
+ * When provided, ALL classification fields come from the LLM. Keyword
+ * heuristics are only used as a fallback when LLM analysis is unavailable.
  */
 export interface LLMAnalysisOverride {
   /** Core or custom task type string. Custom types fall through to default model selection. */
   taskType: string;
   complexity: "simple" | "moderate" | "complex";
+  /** Does the user explicitly want a fast, brief answer? */
+  isSpeedCritical: boolean;
+  /** Is this a trivial/routine task? */
+  isSimpleTask: boolean;
+  /** Does this need extended thinking or multi-step reasoning? */
+  requiresDeepReasoning: boolean;
+  /** Does this require image/video/audio processing? */
+  requiresMultimodal: boolean;
+  /** Is this substantive creative writing (not just "tell me a joke")? */
+  isSubstantiveCreative: boolean;
+  /** Does this warrant deep, multi-source research? */
+  useDeepResearch: boolean;
 }
 
 /**
  * Main decision tree for model selection.
  * All model references use aliases resolved at call time.
  *
- * @param prompt - The user's message (or full conversation context)
+ * When `llmAnalysis` is provided, the LLM's classification fully replaces
+ * keyword heuristics for task type, speed criticality, creativity, reasoning
+ * needs, etc. Keywords are only used as a fallback when LLM analysis is
+ * unavailable (e.g., the analysis API call failed).
+ *
+ * @param prompt - The user's latest message (NOT full conversation history)
  * @param availableProviders - Which API providers have keys configured
- * @param llmAnalysis - Optional LLM-derived analysis to override keyword heuristics.
- *   When provided, the LLM's `taskType` and `complexity` are used instead of
- *   the keyword-based `analyzePrompt()` results.
+ * @param llmAnalysis - Optional LLM-derived analysis to replace keyword heuristics.
+ * @param useDeepResearch - Optional external deep research flag (from client modal).
+ *   True if the user explicitly confirmed deep research mode.
  */
 export function selectOptimalModel(
   prompt: string,
   availableProviders: AvailableProviders,
-  llmAnalysis?: LLMAnalysisOverride
+  llmAnalysis?: LLMAnalysisOverride,
+  useDeepResearch?: boolean,
 ): { primary: ModelOption; fallback: ModelOption | null; reasoning: string } {
   const lowerPrompt = prompt.toLowerCase();
   const heuristicAnalysis = analyzePrompt(prompt);
 
-  // Prefer LLM-derived taskType over keyword heuristics when available
+  // When LLM analysis is available, trust it fully for classification.
+  // Only estimatedTokens comes from the heuristic (char-based math).
   const analysis: PromptAnalysis = llmAnalysis
     ? {
-        ...heuristicAnalysis,
+        estimatedTokens: heuristicAnalysis.estimatedTokens,
         taskType: llmAnalysis.taskType,
-        requiresDeepReasoning: llmAnalysis.complexity === "complex" || heuristicAnalysis.requiresDeepReasoning,
+        isSimpleTask: llmAnalysis.isSimpleTask,
+        isSpeedCritical: llmAnalysis.isSpeedCritical,
+        requiresDeepReasoning: llmAnalysis.requiresDeepReasoning || llmAnalysis.complexity === "complex",
+        requiresMultimodal: llmAnalysis.requiresMultimodal,
       }
     : heuristicAnalysis;
+
   const catalog = buildCatalog();
   const pricing = buildPricing();
   const availableModels = catalog.filter((m) => availableProviders[m.provider]);
@@ -200,6 +226,9 @@ export function selectOptimalModel(
   if (availableModels.length === 0) {
     throw new Error("No API providers available. Please configure at least one API key in Settings.");
   }
+
+  // Deep research is active if the LLM recommends it OR the user confirmed via modal
+  const deepResearchActive = !!(llmAnalysis?.useDeepResearch || useDeepResearch);
 
   // STEP 1: Check if context size requires specific models
   if (analysis.estimatedTokens > 200000) {
@@ -216,30 +245,61 @@ export function selectOptimalModel(
     );
   }
 
-  // STEP 2: Default to lightweight models unless there's a clear reason not to
-  const isSubstantiveCreative =
-    analysis.taskType === "creative" &&
-    (
-      // Explicit content types (broad list of writing formats)
-      lowerPrompt.match(/\b(article|essay|blog\s*post|screenplay|story|novel|chapter|letter|email|speech|report|memo|proposal|presentation|script|review|critique|outline|poem|song|monologue|dialogue|narrative)\b/) ||
-      // Quality descriptors that signal substantive output is expected
-      lowerPrompt.match(/\b(thoughtful|detailed|comprehensive|in-depth|nuanced|elaborate|polished|professional|formal|creative)\b/) ||
-      // Generation verbs followed by an article/determiner — catches "write me a letter", "draft a proposal", etc.
-      lowerPrompt.match(/\b(write|compose|draft|craft|create|author)\b[\s\S]*?\b(a|an|the|my|our|this|me)\b/)
-    );
+  // STEP 2: Deep research mode — premium models with large context windows
+  if (deepResearchActive) {
+    const researchPriority = [r("claude-opus"), r("gemini-pro"), r("claude-sonnet"), r("gpt")];
+    for (const modelId of researchPriority) {
+      const model = availableModels.find((m) => m.model === modelId);
+      if (model) {
+        const fallback = availableModels.find(
+          (m) => m.model !== modelId && (m.costTier === "premium" || m.costTier === "high" || m.costTier === "medium")
+        );
+        return {
+          primary: model,
+          fallback: fallback || null,
+          reasoning: `Deep research mode. ${model.displayName} provides comprehensive analysis capabilities`,
+        };
+      }
+    }
+  }
 
-  const needsPremiumModel =
-    analysis.requiresDeepReasoning ||
-    isSubstantiveCreative ||
-    (analysis.taskType === "coding" &&
-      (lowerPrompt.includes("refactor") ||
-        lowerPrompt.includes("architect") ||
-        lowerPrompt.includes("complex") ||
-        (lowerPrompt.includes("debug") && prompt.length > 500))) ||
-    (analysis.taskType === "math" && lowerPrompt.includes("prove")) ||
-    prompt.length > 2000;
+  // STEP 3: Default to lightweight models unless there's a clear reason not to
+  //
+  // When LLM analysis is available, use its signals directly.
+  // When falling back to keywords, use the original regex-based detection.
+  const isSubstantiveCreative = llmAnalysis
+    ? llmAnalysis.isSubstantiveCreative
+    : (
+        analysis.taskType === "creative" &&
+        (
+          // Explicit content types (broad list of writing formats)
+          lowerPrompt.match(/\b(article|essay|blog\s*post|screenplay|story|novel|chapter|letter|email|speech|report|memo|proposal|presentation|script|review|critique|outline|poem|song|monologue|dialogue|narrative)\b/) ||
+          // Quality descriptors that signal substantive output is expected
+          lowerPrompt.match(/\b(thoughtful|detailed|comprehensive|in-depth|nuanced|elaborate|polished|professional|formal|creative)\b/) ||
+          // Generation verbs followed by an article/determiner — catches "write me a letter", "draft a proposal", etc.
+          lowerPrompt.match(/\b(write|compose|draft|craft|create|author)\b[\s\S]*?\b(a|an|the|my|our|this|me)\b/)
+        )
+      );
 
-  if (!needsPremiumModel) {
+  const needsPremiumModel = llmAnalysis
+    ? (
+        analysis.requiresDeepReasoning ||
+        isSubstantiveCreative
+      )
+    : (
+        // Keyword-based fallback logic (unchanged)
+        analysis.requiresDeepReasoning ||
+        isSubstantiveCreative ||
+        (analysis.taskType === "coding" &&
+          (lowerPrompt.includes("refactor") ||
+            lowerPrompt.includes("architect") ||
+            lowerPrompt.includes("complex") ||
+            (lowerPrompt.includes("debug") && prompt.length > 500))) ||
+        (analysis.taskType === "math" && lowerPrompt.includes("prove")) ||
+        prompt.length > 2000
+      );
+
+  if (!needsPremiumModel && !analysis.isSpeedCritical) {
     const lightweightPriority = [
       r("gemini-flash-lite"),
       r("gpt-nano"),
@@ -264,7 +324,7 @@ export function selectOptimalModel(
     }
   }
 
-  // STEP 3: Speed-critical tasks
+  // STEP 4: Speed-critical tasks
   if (analysis.isSpeedCritical) {
     const fastModels = availableModels
       .filter((m) => m.speedTier === "ultra-fast" || m.speedTier === "fast")
@@ -282,7 +342,7 @@ export function selectOptimalModel(
     }
   }
 
-  // STEP 4: Task-specific model selection (for premium tasks only)
+  // STEP 5: Task-specific model selection (for premium tasks only)
   switch (analysis.taskType) {
     case "coding": {
       const codingPriority = [
@@ -372,7 +432,7 @@ export function selectOptimalModel(
     }
   }
 
-  // STEP 5: Deep reasoning tasks
+  // STEP 6: Deep reasoning tasks
   if (analysis.requiresDeepReasoning) {
     const reasoningPriority = [r("claude-opus"), r("claude-sonnet"), r("gemini-pro"), r("gpt")];
     for (const modelId of reasoningPriority) {
@@ -387,7 +447,7 @@ export function selectOptimalModel(
     }
   }
 
-  // STEP 6: Multimodal requirements
+  // STEP 7: Multimodal requirements
   if (analysis.requiresMultimodal) {
     const multimodalPriority = [r("gemini-pro"), r("gemini-flash"), r("gpt")];
     for (const modelId of multimodalPriority) {
@@ -402,7 +462,7 @@ export function selectOptimalModel(
     }
   }
 
-  // STEP 7: Default fallback - prioritize lightweight models
+  // STEP 8: Default fallback - prioritize lightweight models
   const defaultPriority = [
     r("gemini-flash"),
     r("gpt-mini"),

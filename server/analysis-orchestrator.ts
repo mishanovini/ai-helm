@@ -341,11 +341,20 @@ export async function runAnalysisJob(
         results.fallbackModel = routerResult.fallback;
         results.routerRuleMatched = routerResult.matchedRuleId;
       } else {
-        // Pass LLM-derived taskType and complexity to avoid keyword-only detection
-        const selection = selectOptimalModel(fullContext, availableProviders, {
+        // Pass LLM-derived classification to replace keyword heuristics.
+        // Use safeMessage (current message only) instead of fullContext to
+        // prevent keywords from prior messages triggering false signals.
+        // The LLM analysis already considers conversation history separately.
+        const selection = selectOptimalModel(safeMessage, availableProviders, {
           taskType: analysis.taskType,
           complexity: analysis.complexity,
-        });
+          isSpeedCritical: analysis.isSpeedCritical,
+          isSimpleTask: analysis.isSimpleTask,
+          requiresDeepReasoning: analysis.requiresDeepReasoning,
+          requiresMultimodal: analysis.requiresMultimodal,
+          isSubstantiveCreative: analysis.isSubstantiveCreative,
+          useDeepResearch: analysis.useDeepResearch,
+        }, useDeepResearch);
         results.selectedModel = selection.primary;
         results.modelReasoning = selection.reasoning;
         results.fallbackModel = selection.fallback;

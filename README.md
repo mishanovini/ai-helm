@@ -120,14 +120,18 @@ Display to User
 
 ### Model Selection Logic
 
-The dynamic router evaluates rules in order. Default rules include:
+Model selection is LLM-driven: the consolidated analysis classifies every message with model selection hints (`isSpeedCritical`, `isSimpleTask`, `requiresDeepReasoning`, `isSubstantiveCreative`, `useDeepResearch`, etc.), and the decision tree uses these signals instead of keyword heuristics. Keyword-based fallback is only used when the LLM analysis is unavailable.
 
-- **Simple tasks** - Ultra-cheap models (Gemini Flash-Lite, GPT Nano)
-- **Complex coding** - Claude Sonnet or Gemini Pro
-- **Advanced math** - Gemini Pro
-- **Creative writing** - Claude Opus or Claude Sonnet
-- **Conversation** - GPT
-- **Large context (>200K tokens)** - Gemini Pro (1M token window)
+The 8-step decision tree evaluates in order:
+
+1. **Large context (>200K tokens)** - Gemini Pro (1M token window)
+2. **Deep research mode** - Premium models (Claude Opus, Gemini Pro) for comprehensive multi-source analysis
+3. **Lightweight gate** - Ultra-cheap models for simple, non-speed-critical tasks
+4. **Speed-critical** - Fastest available model when the user explicitly needs a quick response
+5. **Task-specific routing** - Coding → Claude Sonnet, Math → Gemini Pro, Creative → Claude Opus, etc.
+6. **Deep reasoning** - Premium models for complex multi-step analysis
+7. **Multimodal** - Gemini Pro/Flash for image/video/audio tasks
+8. **Default fallback** - Best-value lightweight model
 
 Model versions are automatically discovered from provider APIs (checked daily at noon PST). The codebase uses version-free aliases (e.g., "gemini-pro" instead of "gemini-2.5-pro") that resolve to the latest available version at runtime. Admins can trigger manual model checks from the Admin Console > Models tab.
 
@@ -303,17 +307,17 @@ npm run test:watch
 ```
 
 Test coverage includes:
-- **Model selection** (42 tests) - catalog integrity, prompt analysis, optimal model selection, creative routing, cost estimation, custom task type handling
+- **Model selection** (52 tests) - catalog integrity, prompt analysis, optimal model selection, creative routing, LLM override, deep research routing, cost estimation, custom task type handling
 - **Dynamic router** (32 tests) - default rules, condition matching, first-match-wins evaluation, custom task type extraction, mixed core+custom matching
 - **Encryption** (9 tests) - round-trip, random IV, unicode, tampering detection
-- **Consolidated analysis** (33 tests) - schema validation, security regex patterns, JSON parsing
+- **Consolidated analysis** (50 tests) - schema validation, model selection hints, security regex patterns, block reason catalog, JSON parsing
 - **Demo budget** (23 tests) - per-session and per-IP rate limiting, daily budget cap, midnight reset, status reporting
 - **Model aliases & discovery** (35 tests) - alias registry, pattern matching, resolution, reverse lookup, update/reset
 - **DLP scanner** (26 tests) - credit card (Luhn), SSN, API key, email, phone, IP detection, false-positive filtering, redaction
 - **Provider status** (20 tests) - Atlassian/Google API parsing, degraded/outage detection, caching, error handling, component name resolution
 - **Prompt templates** (8 tests) - seeding, idempotent inserts, usage tracking, API CRUD
 - **System context** (10 tests) - system prompt construction, user context injection, preset activation
-- **Provider rerouting** (15 tests) - fallback logic, auth error retry, multi-provider cascading
+- **Provider rerouting** (19 tests) - fallback logic, auth error retry, multi-provider cascading, retry attempt capture
 
 ## Demo Mode
 
