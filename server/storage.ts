@@ -814,14 +814,22 @@ export class DatabaseStorage implements IStorage {
     const userIds = orgUsers.map(u => u.id);
 
     // Exclude security-halted requests (selectedModel is null) — they never
-    // reached model selection and would show as "Unknown" in charts
+    // reached model selection and would show as "Unknown" in charts.
+    // Use generationMs from phaseTimings (stored in parameters jsonb) when
+    // available so the metric reflects model generation time only, not the
+    // full pipeline duration captured by responseTimeMs.
     const results = await this.db
       .select({
         model: analysisLogs.selectedModel,
         provider: analysisLogs.modelProvider,
         count: count(analysisLogs.id),
         totalCost: sum(analysisLogs.estimatedCost),
-        avgResponseTimeMs: avg(analysisLogs.responseTimeMs),
+        avgGenerationTimeMs: sql<string>`avg(
+          COALESCE(
+            (${analysisLogs.parameters}->'phaseTimings'->>'generationMs')::numeric,
+            ${analysisLogs.responseTimeMs}
+          )
+        )`,
       })
       .from(analysisLogs)
       .where(
@@ -837,7 +845,7 @@ export class DatabaseStorage implements IStorage {
       provider: r.provider ?? "unknown",
       count: Number(r.count),
       totalCost: Number(r.totalCost ?? 0),
-      avgResponseTimeMs: Math.round(Number(r.avgResponseTimeMs ?? 0)),
+      avgResponseTimeMs: Math.round(Number(r.avgGenerationTimeMs ?? 0)),
     }));
   }
 

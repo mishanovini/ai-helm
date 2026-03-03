@@ -1529,7 +1529,7 @@ function ModelPerformance({
               <TableHead>Model</TableHead>
               <TableHead>Provider</TableHead>
               <TableHead className="text-right">Requests</TableHead>
-              <TableHead className="text-right">Avg Response Time</TableHead>
+              <TableHead className="text-right">Avg Generation Time</TableHead>
               <TableHead className="text-right">Usage %</TableHead>
             </TableRow>
           </TableHeader>
