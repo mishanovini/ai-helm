@@ -982,6 +982,233 @@ export class DatabaseStorage implements IStorage {
   }
 
   /**
+   * Get retry analytics aggregated across all org users.
+   * Extracts retryAttempts from the parameters jsonb field and computes
+   * rates, type breakdowns, model upgrade paths, and top error reasons.
+   */
+  async getRetryAnalytics(orgId: string): Promise<{
+    totalMessages: number;
+    totalRetries: number;
+    retryRate: number;
+    byType: { provider_failure: number; validation_failure: number };
+    byModel: Array<{ fromModel: string; toModel: string; count: number; type: string }>;
+    topErrors: Array<{ reason: string; count: number }>;
+    avgRetriesPerMessage: number;
+  }> {
+    const orgUsers = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.orgId, orgId));
+
+    if (orgUsers.length === 0) {
+      return {
+        totalMessages: 0,
+        totalRetries: 0,
+        retryRate: 0,
+        byType: { provider_failure: 0, validation_failure: 0 },
+        byModel: [],
+        topErrors: [],
+        avgRetriesPerMessage: 0,
+      };
+    }
+
+    const userIds = orgUsers.map(u => u.id);
+
+    // Count total messages
+    const [totalRow] = await this.db
+      .select({ total: count(analysisLogs.id) })
+      .from(analysisLogs)
+      .where(inArray(analysisLogs.userId, userIds));
+
+    const totalMessages = Number(totalRow?.total ?? 0);
+
+    // Get all logs that had retries
+    const retryLogs = await this.db
+      .select({ parameters: analysisLogs.parameters })
+      .from(analysisLogs)
+      .where(
+        and(
+          inArray(analysisLogs.userId, userIds),
+          sql`${analysisLogs.parameters}::jsonb ? 'retryAttempts'`
+        )
+      )
+      .orderBy(desc(analysisLogs.createdAt))
+      .limit(500);
+
+    const totalRetries = retryLogs.length;
+    let providerFailureCount = 0;
+    let validationFailureCount = 0;
+    let totalRetryCountSum = 0;
+    const modelPaths = new Map<string, { fromModel: string; toModel: string; count: number; type: string }>();
+    const errorCounts = new Map<string, number>();
+
+    for (const log of retryLogs) {
+      const params = log.parameters as any;
+      const attempts: any[] = params?.retryAttempts ?? [];
+      totalRetryCountSum += params?.retryCount ?? attempts.length;
+
+      for (const attempt of attempts) {
+        if (attempt.type === "provider_failure") {
+          providerFailureCount++;
+        } else {
+          validationFailureCount++;
+        }
+
+        // Track model upgrade paths
+        const pathKey = `${attempt.fromModel}→${attempt.toModel}→${attempt.type}`;
+        const existing = modelPaths.get(pathKey);
+        if (existing) {
+          existing.count++;
+        } else {
+          modelPaths.set(pathKey, {
+            fromModel: attempt.fromModel,
+            toModel: attempt.toModel,
+            count: 1,
+            type: attempt.type,
+          });
+        }
+
+        // Track error reasons (truncate to avoid long unique strings)
+        const reason = (attempt.reason || "Unknown").substring(0, 100);
+        errorCounts.set(reason, (errorCounts.get(reason) ?? 0) + 1);
+      }
+    }
+
+    // Sort model paths and errors by count descending
+    const byModel = Array.from(modelPaths.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    const topErrors = Array.from(errorCounts.entries())
+      .map(([reason, cnt]) => ({ reason, count: cnt }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    return {
+      totalMessages,
+      totalRetries,
+      retryRate: totalMessages > 0 ? totalRetries / totalMessages : 0,
+      byType: {
+        provider_failure: providerFailureCount,
+        validation_failure: validationFailureCount,
+      },
+      byModel,
+      topErrors,
+      avgRetriesPerMessage: totalRetries > 0
+        ? Math.round((totalRetryCountSum / totalRetries) * 10) / 10
+        : 0,
+    };
+  }
+
+  /**
+   * Get daily retry timeline for the last N days.
+   * Returns per-day counts of total messages, retried messages, and breakdown
+   * by retry type (provider failure vs validation failure).
+   */
+  async getRetryTimeline(orgId: string, days: number = 30): Promise<Array<{
+    date: string;
+    totalMessages: number;
+    retriedMessages: number;
+    providerFailures: number;
+    validationFailures: number;
+  }>> {
+    const orgUsers = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.orgId, orgId));
+
+    if (orgUsers.length === 0) return [];
+
+    const userIds = orgUsers.map(u => u.id);
+    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Query daily totals + retry counts
+    const rows = await this.db
+      .select({
+        date: sql<string>`DATE(${analysisLogs.createdAt})`.as("date"),
+        totalMessages: count(analysisLogs.id),
+        retriedMessages: count(
+          sql`CASE WHEN ${analysisLogs.parameters}::jsonb ? 'retryAttempts' THEN 1 END`
+        ),
+      })
+      .from(analysisLogs)
+      .where(
+        and(
+          inArray(analysisLogs.userId, userIds),
+          gte(analysisLogs.createdAt, startDate)
+        )
+      )
+      .groupBy(sql`DATE(${analysisLogs.createdAt})`)
+      .orderBy(sql`DATE(${analysisLogs.createdAt})`);
+
+    // We also need per-day provider/validation breakdown — extract from retryAttempts jsonb
+    // Fetch logs with retry data for the period to classify by type
+    const retryLogs = await this.db
+      .select({
+        date: sql<string>`DATE(${analysisLogs.createdAt})`.as("date"),
+        parameters: analysisLogs.parameters,
+      })
+      .from(analysisLogs)
+      .where(
+        and(
+          inArray(analysisLogs.userId, userIds),
+          gte(analysisLogs.createdAt, startDate),
+          sql`${analysisLogs.parameters}::jsonb ? 'retryAttempts'`
+        )
+      );
+
+    // Build per-day breakdown from retry attempt types
+    const dayBreakdown = new Map<string, { provider: number; validation: number }>();
+    for (const log of retryLogs) {
+      const dateStr = String(log.date);
+      const params = log.parameters as any;
+      const attempts: any[] = params?.retryAttempts ?? [];
+      if (!dayBreakdown.has(dateStr)) {
+        dayBreakdown.set(dateStr, { provider: 0, validation: 0 });
+      }
+      const entry = dayBreakdown.get(dateStr)!;
+      for (const a of attempts) {
+        if (a.type === "provider_failure") entry.provider++;
+        else entry.validation++;
+      }
+    }
+
+    // Build complete date series with gaps filled
+    const dataMap = new Map<string, { totalMessages: number; retriedMessages: number }>();
+    for (const row of rows) {
+      dataMap.set(String(row.date), {
+        totalMessages: Number(row.totalMessages),
+        retriedMessages: Number(row.retriedMessages),
+      });
+    }
+
+    const result: Array<{
+      date: string;
+      totalMessages: number;
+      retriedMessages: number;
+      providerFailures: number;
+      validationFailures: number;
+    }> = [];
+
+    for (let i = 0; i < days; i++) {
+      const d = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
+      const dateStr = d.toISOString().split("T")[0];
+      const dayData = dataMap.get(dateStr);
+      const breakdown = dayBreakdown.get(dateStr);
+
+      result.push({
+        date: dateStr,
+        totalMessages: dayData?.totalMessages ?? 0,
+        retriedMessages: dayData?.retriedMessages ?? 0,
+        providerFailures: breakdown?.provider ?? 0,
+        validationFailures: breakdown?.validation ?? 0,
+      });
+    }
+
+    return result;
+  }
+
+  /**
    * Compute average phase timings across all org users' recent analysis logs.
    * Extracts phaseTimings from the parameters jsonb field.
    */

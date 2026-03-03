@@ -12,6 +12,7 @@ import {
   selectUpgradeModel,
   PROVIDER_STATUS_URLS,
   type ProviderFailure,
+  type RetryAttempt,
 } from "../../server/analysis-orchestrator";
 import type { ModelOption, Provider, CostTier } from "../../shared/model-selection";
 
@@ -258,5 +259,83 @@ describe("selectUpgradeModel", () => {
     const result = selectUpgradeModel(openaiLow, [openaiLow, openaiMedium]);
     expect(result).not.toBeNull();
     expect(result!.model).toBe("gpt-4o");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RetryAttempt interface shape
+// ---------------------------------------------------------------------------
+
+describe("RetryAttempt", () => {
+  it("satisfies the expected shape for provider failure", () => {
+    const attempt: RetryAttempt = {
+      attempt: 1,
+      type: "provider_failure",
+      fromModel: "gpt-4o-mini",
+      fromProvider: "openai",
+      toModel: "claude-haiku",
+      toProvider: "anthropic",
+      reason: "429 rate limited",
+    };
+    expect(attempt.type).toBe("provider_failure");
+    expect(attempt.attempt).toBe(1);
+    expect(attempt.fromModel).toBe("gpt-4o-mini");
+    expect(attempt.toModel).toBe("claude-haiku");
+    expect(attempt.temperatureChange).toBeUndefined();
+  });
+
+  it("satisfies the expected shape for validation failure with temperature change", () => {
+    const attempt: RetryAttempt = {
+      attempt: 1,
+      type: "validation_failure",
+      fromModel: "gpt-4o-mini",
+      fromProvider: "openai",
+      toModel: "claude-sonnet",
+      toProvider: "anthropic",
+      reason: "Response failed relevance check",
+      temperatureChange: { from: 0.7, to: 0.9 },
+    };
+    expect(attempt.type).toBe("validation_failure");
+    expect(attempt.temperatureChange).toBeDefined();
+    expect(attempt.temperatureChange!.from).toBe(0.7);
+    expect(attempt.temperatureChange!.to).toBe(0.9);
+  });
+
+  it("captures model upgrade path correctly using selectUpgradeModel", () => {
+    const upgradeModel = selectUpgradeModel(openaiLow, allModels);
+    expect(upgradeModel).not.toBeNull();
+
+    const attempt: RetryAttempt = {
+      attempt: 1,
+      type: "validation_failure",
+      fromModel: openaiLow.model,
+      fromProvider: openaiLow.provider,
+      toModel: upgradeModel!.model,
+      toProvider: upgradeModel!.provider,
+      reason: "Response lacked specificity",
+    };
+
+    expect(attempt.fromModel).toBe("gpt-4o-mini");
+    // Upgrade should be to a medium-tier model
+    expect(["medium", "high", "premium"]).toContain(upgradeModel!.costTier);
+  });
+
+  it("captures provider failover path correctly using selectAlternativeModel", () => {
+    const failedProviders = new Set<Provider>(["openai"]);
+    const alternative = selectAlternativeModel(openaiLow, allModels, failedProviders);
+    expect(alternative).not.toBeNull();
+
+    const attempt: RetryAttempt = {
+      attempt: 1,
+      type: "provider_failure",
+      fromModel: openaiLow.model,
+      fromProvider: openaiLow.provider,
+      toModel: alternative!.model,
+      toProvider: alternative!.provider,
+      reason: "500 Internal Server Error",
+    };
+
+    expect(attempt.fromProvider).toBe("openai");
+    expect(attempt.toProvider).not.toBe("openai");
   });
 });

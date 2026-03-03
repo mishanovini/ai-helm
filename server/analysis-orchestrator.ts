@@ -260,6 +260,9 @@ export async function runAnalysisJob(
             promptSpecificity: analysis.promptQuality.specificity,
             promptActionability: analysis.promptQuality.actionability,
             responseTimeMs: Date.now() - startTime,
+            parameters: {
+              ...(analysis.blockReasonId ? { blockReasonId: analysis.blockReasonId } : {}),
+            } as any,
           });
         } catch {
           // Non-critical: log failure doesn't block the pipeline
@@ -460,6 +463,7 @@ export async function runAnalysisJob(
     let retryCount = 0;
     const failedProviders = new Set<Provider>();
     const providerFailures: ProviderFailure[] = [];
+    const retryAttempts: RetryAttempt[] = [];
 
     /** Accumulate generation-only and validation-only durations across retries */
     let totalGenerationMs = 0;
@@ -533,9 +537,20 @@ export async function runAnalysisJob(
         // Clear any partial streamed response
         sendUpdate("response_clear", "processing");
 
+        // Record retry attempt details for analytics
+        retryCount++;
+        retryAttempts.push({
+          attempt: retryCount,
+          type: "provider_failure",
+          fromModel: currentModel.model,
+          fromProvider: currentModel.provider,
+          toModel: alternative.model,
+          toProvider: alternative.provider,
+          reason: generationError.message,
+        });
+
         // Switch to alternative model
         currentModel = alternative;
-        retryCount++;
 
         // Recalculate cost estimate
         const estimatedInputTokens = Math.ceil(
@@ -597,8 +612,22 @@ export async function runAnalysisJob(
           break;
         }
 
-        // Notify client of retry and clear streamed response
+        // Record retry attempt details for analytics
         retryCount++;
+        const prevTemperature = currentParameters.temperature;
+        const nextTemperature = Math.min(prevTemperature + 0.2, 1.0);
+        retryAttempts.push({
+          attempt: retryCount,
+          type: "validation_failure",
+          fromModel: currentModel.model,
+          fromProvider: currentModel.provider,
+          toModel: upgradeModel.model,
+          toProvider: upgradeModel.provider,
+          reason: validation.failReason || validation.validation || "Validation failed",
+          temperatureChange: { from: prevTemperature, to: nextTemperature },
+        });
+
+        // Notify client of retry and clear streamed response
         sendUpdate("retrying", "processing", {
           reason: validation.validation,
           failReason: validation.failReason,
@@ -611,7 +640,7 @@ export async function runAnalysisJob(
         currentModel = upgradeModel;
         currentParameters = {
           ...currentParameters,
-          temperature: Math.min(currentParameters.temperature + 0.2, 1.0),
+          temperature: nextTemperature,
         };
 
         // Recalculate cost estimate for the new model
@@ -720,6 +749,7 @@ export async function runAnalysisJob(
           parameters: {
             ...results.parameters,
             ...(providerFailures.length > 0 ? { providerFailures } : {}),
+            ...(retryAttempts.length > 0 ? { retryAttempts, retryCount } : {}),
             phaseTimings,
           } as any,
           responseTimeMs,
@@ -791,6 +821,27 @@ export interface ProviderFailure {
   model: string;
   error: string;
   timestamp: string;
+}
+
+/**
+ * Captures one retry attempt with full context for analytics.
+ * Stored in the analysisLogs parameters jsonb alongside providerFailures.
+ */
+export interface RetryAttempt {
+  /** 1-based retry number */
+  attempt: number;
+  /** What triggered this retry */
+  type: "provider_failure" | "validation_failure";
+  /** Model that failed */
+  fromModel: string;
+  fromProvider: string;
+  /** Model retried with */
+  toModel: string;
+  toProvider: string;
+  /** Error message (provider) or validation fail reason */
+  reason: string;
+  /** Temperature change applied during validation retries */
+  temperatureChange?: { from: number; to: number };
 }
 
 /** Status page URLs for each provider — used in failure notifications */

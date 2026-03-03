@@ -73,6 +73,93 @@ const exploitationPatterns = [
   /circumvent\s+(the\s+)?(safety|content)\s+filter/i,
 ];
 
+// ---------------------------------------------------------------------------
+// Block Reason Catalog — user-friendly explanations selected by detected patterns
+// ---------------------------------------------------------------------------
+
+/** A categorized security block reason with user-facing and admin-facing text. */
+export interface BlockReason {
+  /** Machine-readable identifier (e.g., "prompt_injection") */
+  id: string;
+  /** Lowercase keywords to match against flags and intentOverride text */
+  keywords: string[];
+  /** Clean, non-technical message shown to the end user */
+  userMessage: string;
+  /** More detailed explanation shown in the admin console */
+  adminDetail: string;
+}
+
+/**
+ * Ordered catalog of block reasons. Evaluated top-to-bottom; the first match
+ * wins. The last entry (`general_security`) has no keywords and always matches
+ * as a fallback.
+ */
+export const BLOCK_REASONS: BlockReason[] = [
+  {
+    id: "prompt_injection",
+    keywords: ["critical threat", "prompt injection", "override system instructions", "bypass safety controls"],
+    userMessage: "This request was blocked because it appears to contain instructions that could manipulate the AI system's behavior.",
+    adminDetail: "Prompt injection attempt — user tried to override system instructions or extract internal configuration.",
+  },
+  {
+    id: "jailbreak_attempt",
+    keywords: ["jailbreak", "unrestricted", "unfiltered", "developer mode", "dan mode", "god mode"],
+    userMessage: "This request was blocked because it attempts to remove the AI system's safety guidelines.",
+    adminDetail: "Jailbreak attempt — user tried to disable safety controls or enter unrestricted mode.",
+  },
+  {
+    id: "exploitation_learning",
+    keywords: ["exploitation learning", "exploitation technique", "ai exploitation"],
+    userMessage: "This request was blocked because it seeks information about exploiting AI systems.",
+    adminDetail: "Seeking AI exploitation techniques (jailbreaking methods, prompt injection tutorials, safety bypass strategies).",
+  },
+  {
+    id: "social_engineering",
+    keywords: ["social engineering", "authority impersonation", "urgency"],
+    userMessage: "This request was blocked because it contains patterns commonly associated with social engineering attempts.",
+    adminDetail: "Social engineering indicators — authority impersonation, urgency signals, or sensitive data requests.",
+  },
+  {
+    id: "sensitive_data",
+    keywords: ["credential", "password", "api key", "credit card", "ssn", "sensitive data"],
+    userMessage: "This request was blocked because it involves potentially sensitive or private information.",
+    adminDetail: "Request involves sensitive data patterns (credentials, financial information, PII).",
+  },
+  {
+    id: "general_security",
+    keywords: [],  // Fallback — always matches
+    userMessage: "This request was blocked due to security concerns.",
+    adminDetail: "General security policy violation.",
+  },
+];
+
+/**
+ * Select the most appropriate block reason from the catalog based on the
+ * detected security flags and intent override text.
+ *
+ * Combines all detection signals into a single search string, then walks
+ * the catalog top-to-bottom and returns the first match. The last entry
+ * has no keywords and always matches as a fallback.
+ */
+export function selectBlockReason(
+  flags: string[],
+  intentOverride?: string
+): BlockReason {
+  const searchText = [
+    ...flags,
+    intentOverride ?? "",
+  ].join(" ").toLowerCase();
+
+  for (const reason of BLOCK_REASONS) {
+    // Empty keywords array = always-match fallback (must be last)
+    if (reason.keywords.length === 0) return reason;
+    if (reason.keywords.some(kw => searchText.includes(kw))) return reason;
+  }
+
+  // Should never reach here since the last entry always matches
+  return BLOCK_REASONS[BLOCK_REASONS.length - 1];
+}
+
 /** Social engineering and sensitive data request patterns */
 const socialEngineeringPatterns = [
   // Authority impersonation / urgency
@@ -336,11 +423,14 @@ export async function runConsolidatedAnalysis(
     // Step 6: Build security explanation.
     // When intentOverride is set, the LLM's securityExplanation is also
     // untrustworthy (the injection manipulates ALL of the LLM's output fields,
-    // not just intent). Use a hardcoded explanation based on the detected category.
+    // not just intent). Select a clean, user-friendly reason from the catalog.
     let finalSecurityExplanation: string;
+    let blockReasonId: string | undefined;
     if (intentOverride) {
-      // Fully replace — don't mix fabricated LLM output with real detection flags
-      finalSecurityExplanation = `${flags.join(". ")}. ${intentOverride}`;
+      // Select the best-matching user-friendly reason from the catalog
+      const blockReason = selectBlockReason(flags, intentOverride);
+      finalSecurityExplanation = blockReason.userMessage;
+      blockReasonId = blockReason.id;
     } else if (flags.length > 0 && finalSecurityScore > result.securityScore) {
       // Floor score raised by regex but no full override — append detection note
       const flagNote = `Detected: ${flags.join(", ")}`;
@@ -370,6 +460,7 @@ export async function runConsolidatedAnalysis(
       conversationTitle: finalTitle,
       securityScore: Math.min(finalSecurityScore, 10),
       securityExplanation: finalSecurityExplanation,
+      blockReasonId,
     };
   } catch (error: any) {
     // Check if this is an auth/permission error — if so, throw immediately
@@ -434,9 +525,12 @@ async function runFallbackAnalysis(
   // Apply floor score and override explanation when threat confirmed by regex
   const finalSecurityScore = Math.max(securityResult.score, securityFloorScore);
   let finalExplanation: string;
+  let blockReasonId: string | undefined;
   if (intentOverride) {
-    // Fully replace — LLM explanation is untrustworthy when injection detected
-    finalExplanation = `${securityFlags.join(". ")}. ${intentOverride}`;
+    // Select clean, user-friendly reason from the catalog
+    const blockReason = selectBlockReason(securityFlags, intentOverride);
+    finalExplanation = blockReason.userMessage;
+    blockReasonId = blockReason.id;
   } else if (securityFlags.length > 0 && finalSecurityScore > securityResult.score) {
     finalExplanation = `${securityResult.explanation}. Detected: ${securityFlags.join(", ")}`;
   } else {
@@ -501,6 +595,7 @@ async function runFallbackAnalysis(
     ) as ConsolidatedAnalysisResult["style"],
     securityScore: Math.min(finalSecurityScore, 10),
     securityExplanation: finalExplanation,
+    blockReasonId,
     taskType,
     complexity,
     promptQuality: { score, clarity, specificity, actionability, suggestions },

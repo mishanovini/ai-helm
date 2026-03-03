@@ -25,7 +25,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Redirect } from "wouter";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, AreaChart, Area, Legend,
+  PieChart, Pie, Cell, AreaChart, Area, Legend, Line, ComposedChart,
 } from "recharts";
 import {
   LayoutDashboard,
@@ -299,6 +299,27 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
     enabled: canQuery,
   });
 
+  // Retry analytics
+  const { data: retryStats } = useQuery({
+    queryKey: ["adminRetryStats"],
+    queryFn: async () => {
+      const res = await adminFetch("/api/admin/analytics/retry-stats");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: canQuery,
+  });
+
+  const { data: retryTimeline } = useQuery({
+    queryKey: ["adminRetryTimeline"],
+    queryFn: async () => {
+      const res = await adminFetch("/api/admin/analytics/retry-timeline?days=30");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: canQuery,
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -381,6 +402,9 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
 
             {/* Usage Over Time — stacked area chart */}
             <UsageOverTimeChart data={usageOverTime} />
+
+            {/* Retry Analytics — rate, timeline, and model upgrade paths */}
+            <RetryAnalytics stats={retryStats} timeline={retryTimeline} />
 
             {/* Users Needing Attention */}
             <UsersNeedingAttention users={users} />
@@ -1164,6 +1188,198 @@ function UsageOverTimeChart({ data }: { data: any[] | undefined }) {
             />
           </AreaChart>
         </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Retry analytics section: summary metrics, timeline chart, and model upgrade paths.
+ * Shows retry rate, provider failure vs validation failure breakdown, and
+ * which model transitions occur during retries.
+ */
+function RetryAnalytics({ stats, timeline }: { stats: any | undefined; timeline: any[] | undefined }) {
+  // Don't render if no data at all
+  if (!stats && !timeline) return null;
+
+  const retryRate = stats ? (stats.retryRate * 100).toFixed(1) : "0";
+  const providerCount = stats?.byType?.provider_failure ?? 0;
+  const validationCount = stats?.byType?.validation_failure ?? 0;
+  const avgRetries = stats?.avgRetriesPerMessage ?? 0;
+  const hasTimelineData = timeline?.some(d => d.retriedMessages > 0 || d.providerFailures > 0 || d.validationFailures > 0);
+
+  // Format timeline dates
+  const chartData = timeline?.map(d => ({
+    ...d,
+    label: new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+  }));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <RefreshCw className="h-5 w-5 text-primary" />
+          Retry Analytics
+        </CardTitle>
+        <CardDescription>
+          Provider failures and validation retries across all messages
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Summary metrics row */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="rounded-lg border p-3 text-center">
+            <p className="text-xs text-muted-foreground">Retry Rate</p>
+            <p className="text-xl font-bold">{retryRate}%</p>
+          </div>
+          <div className="rounded-lg border p-3 text-center">
+            <p className="text-xs text-muted-foreground">Provider Failures</p>
+            <p className={cn("text-xl font-bold", providerCount > 0 && "text-destructive")}>{providerCount}</p>
+          </div>
+          <div className="rounded-lg border p-3 text-center">
+            <p className="text-xs text-muted-foreground">Validation Retries</p>
+            <p className={cn("text-xl font-bold", validationCount > 0 && "text-amber-500")}>{validationCount}</p>
+          </div>
+          <div className="rounded-lg border p-3 text-center">
+            <p className="text-xs text-muted-foreground">Avg Retries / Message</p>
+            <p className="text-xl font-bold">{avgRetries}</p>
+          </div>
+        </div>
+
+        {/* Two-column layout: timeline chart + model upgrade paths */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left: Retry Timeline */}
+          <div>
+            <h4 className="text-sm font-medium mb-3">Retry Timeline (30 days)</h4>
+            {hasTimelineData && chartData ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <defs>
+                    <linearGradient id="colorProviderFail" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorValidationFail" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10 }}
+                    interval={Math.floor((chartData?.length ?? 1) / 6)}
+                  />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                    labelStyle={{ fontWeight: 600 }}
+                  />
+                  <Legend />
+                  <Area
+                    type="monotone"
+                    dataKey="providerFailures"
+                    name="Provider Failures"
+                    stackId="retries"
+                    stroke="#ef4444"
+                    fill="url(#colorProviderFail)"
+                    strokeWidth={2}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="validationFailures"
+                    name="Validation Retries"
+                    stackId="retries"
+                    stroke="#f59e0b"
+                    fill="url(#colorValidationFail)"
+                    strokeWidth={2}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="totalMessages"
+                    name="Total Messages"
+                    stroke="#94a3b8"
+                    strokeDasharray="4 4"
+                    strokeWidth={1.5}
+                    dot={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No retry data in the last 30 days — all requests succeeded on first attempt.
+              </p>
+            )}
+          </div>
+
+          {/* Right: Model Upgrade Paths */}
+          <div>
+            <h4 className="text-sm font-medium mb-3">Model Upgrade Paths</h4>
+            {stats?.byModel && stats.byModel.length > 0 ? (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">From</TableHead>
+                      <TableHead className="text-xs"></TableHead>
+                      <TableHead className="text-xs">To</TableHead>
+                      <TableHead className="text-xs text-right">Count</TableHead>
+                      <TableHead className="text-xs">Trigger</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stats.byModel.map((path: any, i: number) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-xs font-mono">{path.fromModel}</TableCell>
+                        <TableCell className="text-center">
+                          <ArrowRight className="h-3 w-3 text-muted-foreground inline-block" />
+                        </TableCell>
+                        <TableCell className="text-xs font-mono">{path.toModel}</TableCell>
+                        <TableCell className="text-xs text-right font-medium">{path.count}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px]",
+                              path.type === "provider_failure"
+                                ? "text-destructive border-destructive/30"
+                                : "text-amber-600 border-amber-500/30"
+                            )}
+                          >
+                            {path.type === "provider_failure" ? "Provider" : "Validation"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No model upgrades recorded yet.
+              </p>
+            )}
+
+            {/* Top Error Reasons */}
+            {stats?.topErrors && stats.topErrors.length > 0 && (
+              <div className="mt-4">
+                <h4 className="text-sm font-medium mb-2">Top Retry Reasons</h4>
+                <div className="space-y-1.5">
+                  {stats.topErrors.map((err: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground truncate max-w-[280px]" title={err.reason}>
+                        {err.reason}
+                      </span>
+                      <Badge variant="secondary" className="text-[10px] ml-2 shrink-0">
+                        {err.count}×
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

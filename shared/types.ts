@@ -57,6 +57,8 @@ export interface ConsolidatedAnalysisResult {
   style: "formal" | "casual" | "technical" | "concise" | "verbose" | "neutral";
   securityScore: number;
   securityExplanation: string;
+  /** Catalog ID of the matched block reason (e.g., "prompt_injection"), set when intentOverride is active */
+  blockReasonId?: string;
   taskType: string;
   complexity: "simple" | "moderate" | "complex";
   promptQuality: PromptQuality;

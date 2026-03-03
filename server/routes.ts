@@ -936,6 +936,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /** Retry analytics — aggregated retry rates, model upgrade paths, and top errors */
+  app.get("/api/admin/analytics/retry-stats", requireAdmin, async (req, res) => {
+    try {
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
+      if (!orgId) return res.status(401).json({ error: "Not authenticated" });
+
+      const data = await storage.getRetryAnalytics(orgId);
+      res.json(data);
+    } catch (error: any) {
+      console.error("Admin retry stats error:", error);
+      res.status(500).json({ error: "Failed to get retry analytics" });
+    }
+  });
+
+  /** Retry timeline — daily retry counts for chart visualization */
+  app.get("/api/admin/analytics/retry-timeline", requireAdmin, async (req, res) => {
+    try {
+      const orgId = req.user?.orgId || (isAuthRequired() ? null : DEMO_ORG_ID);
+      if (!orgId) return res.status(401).json({ error: "Not authenticated" });
+
+      const days = Math.min(Number(req.query.days) || 30, 90);
+      const data = await storage.getRetryTimeline(orgId, days);
+      res.json(data);
+    } catch (error: any) {
+      console.error("Admin retry timeline error:", error);
+      res.status(500).json({ error: "Failed to get retry timeline" });
+    }
+  });
+
   // List org users
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     try {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
+import { selectBlockReason, BLOCK_REASONS } from "../../server/consolidated-analysis";
 
 /**
  * Tests for consolidated analysis pipeline.
@@ -353,5 +354,107 @@ describe("Security pre-check patterns", () => {
       const result = securityPreCheck("What are common security vulnerabilities in web apps?");
       expect(result.floorScore).toBe(0);
     });
+  });
+});
+
+// ============================================================================
+// Block reason catalog and selection
+// ============================================================================
+
+describe("Block reason selection", () => {
+  it("should select prompt_injection for critical threat flags", () => {
+    const reason = selectBlockReason(
+      ["Critical threat pattern detected"],
+      "Direct prompt injection attempt — the user is trying to override system instructions, extract internal configuration, or bypass safety controls."
+    );
+    expect(reason.id).toBe("prompt_injection");
+    expect(reason.userMessage).toContain("manipulate the AI system");
+  });
+
+  it("should select jailbreak_attempt for jailbreak patterns", () => {
+    // When flags/override contain jailbreak keywords but not prompt_injection keywords
+    const reason = selectBlockReason(
+      ["Jailbreak mode activation detected"],
+      "User is trying to enter unrestricted DAN mode."
+    );
+    expect(reason.id).toBe("jailbreak_attempt");
+    expect(reason.userMessage).toContain("safety guidelines");
+  });
+
+  it("should select exploitation_learning for exploitation flags", () => {
+    const reason = selectBlockReason(
+      ["Exploitation learning pattern detected"],
+      "The user is seeking information about AI exploitation techniques."
+    );
+    expect(reason.id).toBe("exploitation_learning");
+    expect(reason.userMessage).toContain("exploiting AI systems");
+  });
+
+  it("should select social_engineering for social engineering flags", () => {
+    const reason = selectBlockReason(
+      ["Social engineering pattern detected"],
+      "Likely social engineering attempt — the message uses authority impersonation, urgency, or sensitive data request patterns."
+    );
+    expect(reason.id).toBe("social_engineering");
+    expect(reason.userMessage).toContain("social engineering");
+  });
+
+  it("should select sensitive_data for credential-related flags", () => {
+    const reason = selectBlockReason(
+      ["Sensitive data request detected"],
+      "Request involves credential extraction and password harvesting."
+    );
+    expect(reason.id).toBe("sensitive_data");
+    expect(reason.userMessage).toContain("sensitive or private");
+  });
+
+  it("should fall back to general_security when no keywords match", () => {
+    const reason = selectBlockReason(
+      ["Unknown pattern"],
+      "Some other unrecognized threat type."
+    );
+    expect(reason.id).toBe("general_security");
+    expect(reason.userMessage).toContain("security concerns");
+  });
+
+  it("should fall back to general_security with empty inputs", () => {
+    const reason = selectBlockReason([], undefined);
+    expect(reason.id).toBe("general_security");
+  });
+
+  it("should match case-insensitively", () => {
+    const reason = selectBlockReason(
+      ["CRITICAL THREAT detected"],
+      "Direct PROMPT INJECTION attempt"
+    );
+    expect(reason.id).toBe("prompt_injection");
+  });
+
+  it("should prioritize earlier catalog entries over later ones", () => {
+    // A message that could match both prompt_injection and jailbreak
+    // should match prompt_injection first since it's earlier in the catalog
+    const reason = selectBlockReason(
+      ["Critical threat pattern detected"],
+      "Override system instructions to bypass safety controls in jailbreak mode"
+    );
+    expect(reason.id).toBe("prompt_injection");
+  });
+
+  it("should have user-friendly messages (no raw flag text)", () => {
+    for (const reason of BLOCK_REASONS) {
+      // User messages should be proper sentences, not raw detection flags
+      expect(reason.userMessage).toMatch(/^[A-Z]/); // Starts with capital letter
+      expect(reason.userMessage).toMatch(/\.$/);     // Ends with period
+      // Should not contain technical flag text
+      expect(reason.userMessage).not.toContain("floor score");
+      expect(reason.userMessage).not.toContain("floorScore");
+      expect(reason.userMessage).not.toContain("intentOverride");
+    }
+  });
+
+  it("should have the general_security fallback as the last entry", () => {
+    const lastReason = BLOCK_REASONS[BLOCK_REASONS.length - 1];
+    expect(lastReason.id).toBe("general_security");
+    expect(lastReason.keywords).toHaveLength(0);
   });
 });
