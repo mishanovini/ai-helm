@@ -28,7 +28,6 @@ export interface AnalysisJob {
   jobId: string;
   message: string;
   conversationHistory: ConversationMessage[];
-  useDeepResearch: boolean;
   apiKeys: APIKeys;
   userId?: string | null;
   orgId?: string | null;
@@ -36,6 +35,12 @@ export interface AnalysisJob {
   signal?: AbortSignal;
   /** System prompt from an active AI assistant preset (Phase D) */
   systemPrompt?: string | null;
+  /**
+   * Callback to request deep research confirmation from the client.
+   * Returns true if the user confirms, false if they decline.
+   * Undefined if no confirmation mechanism is available.
+   */
+  requestDeepResearchConfirmation?: () => Promise<boolean>;
 }
 
 // Default security threshold if org settings not available
@@ -50,7 +55,7 @@ export async function runAnalysisJob(
   job: AnalysisJob,
   ws: WebSocket
 ): Promise<AnalysisJobResult | undefined> {
-  const { jobId, message, conversationHistory, useDeepResearch, apiKeys } = job;
+  const { jobId, message, conversationHistory, apiKeys } = job;
 
   const results: any = {};
   let hasError = false;
@@ -312,6 +317,23 @@ export async function runAnalysisJob(
     }
 
     // ========================================================================
+    // Phase 1.5: Deep Research Confirmation (mid-pipeline)
+    // ========================================================================
+    // If the LLM analysis recommends deep research, pause and ask the client
+    // for confirmation before proceeding to model selection.
+
+    let useDeepResearch = false;
+    if (analysis.useDeepResearch && job.requestDeepResearchConfirmation) {
+      sendUpdate("deep_research_confirm", "processing", {
+        reasoning: "The analysis pipeline determined this request would benefit from deep, multi-source research.",
+      });
+
+      useDeepResearch = await job.requestDeepResearchConfirmation();
+
+      sendUpdate("deep_research_confirm", "completed", { confirmed: useDeepResearch });
+    }
+
+    // ========================================================================
     // Phase 2: Model Selection
     // ========================================================================
 
@@ -327,8 +349,7 @@ export async function runAnalysisJob(
         ? `${safeHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}\nuser: ${safeMessage}`
         : safeMessage;
 
-      // Try dynamic router first, fall back to hardcoded selection
-      // (router uses original message for regex matching — no PII sent externally)
+      // Try dynamic router first, fall back to intelligent selection
       const routerResult = await evaluateRules(
         { message: safeMessage, analysis, availableProviders },
         job.orgId,
@@ -341,10 +362,9 @@ export async function runAnalysisJob(
         results.fallbackModel = routerResult.fallback;
         results.routerRuleMatched = routerResult.matchedRuleId;
       } else {
-        // Pass LLM-derived classification to replace keyword heuristics.
-        // Use safeMessage (current message only) instead of fullContext to
-        // prevent keywords from prior messages triggering false signals.
-        // The LLM analysis already considers conversation history separately.
+        // Pass LLM-derived classification for model selection.
+        // Use safeMessage (current message only) — the LLM analysis already
+        // considers conversation history separately.
         const selection = selectOptimalModel(safeMessage, availableProviders, {
           taskType: analysis.taskType,
           complexity: analysis.complexity,

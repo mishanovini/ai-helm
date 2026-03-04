@@ -264,70 +264,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Deep Research Classification
   // ========================================================================
 
-  /**
-   * Use an LLM to classify whether a prompt warrants deep, multi-source research.
-   * Falls back to false if no API keys are available or the call times out.
-   */
-  app.post("/api/classify-research", async (req, res) => {
-    try {
-      const { message, apiKeys: clientKeys } = req.body;
-
-      if (!message) {
-        return res.status(400).json({ deepResearch: false });
-      }
-
-      // Use demo keys if user has none, falling back to false if no keys at all
-      const keys = {
-        gemini: clientKeys?.gemini || (isDemoMode() ? getDemoKeys().gemini : ""),
-        openai: clientKeys?.openai || (isDemoMode() ? getDemoKeys().openai : ""),
-        anthropic: clientKeys?.anthropic || (isDemoMode() ? getDemoKeys().anthropic : ""),
-      };
-
-      const { selectCheapestModel } = await import("../shared/model-selection");
-      const { runAnalysis } = await import("./universal-analysis");
-
-      const providers = {
-        gemini: !!keys.gemini,
-        openai: !!keys.openai,
-        anthropic: !!keys.anthropic,
-      };
-
-      const model = selectCheapestModel(providers);
-      if (!model) {
-        return res.json({ deepResearch: false });
-      }
-
-      const apiKey = keys[model.provider] || "";
-
-      // 5-second timeout — if LLM takes too long, fall back to heuristic on client
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-
-      try {
-        const response = await Promise.race([
-          runAnalysis(
-            model,
-            apiKey,
-            "You classify user prompts. Answer with only 'yes' or 'no'.",
-            `Would this prompt benefit from deep research mode (a premium model with extended processing time)?\n\nSay 'yes' if ANY of these apply:\n- The user explicitly asks to research, analyze, or investigate a topic\n- The prompt asks for comparison, evaluation, or synthesis across multiple dimensions\n- The prompt requests data gathering, market analysis, or historical review\n- The prompt contains multiple complex sub-questions\n- The task would clearly benefit from a more capable, slower model\n\nSay 'no' for simple questions, creative writing, coding help, translations, or casual conversation.\n\nPrompt: "${message}"`
-          ),
-          new Promise<string>((_, reject) =>
-            setTimeout(() => reject(new Error("timeout")), 5000)
-          ),
-        ]);
-
-        clearTimeout(timeout);
-        const answer = response.trim().toLowerCase();
-        res.json({ deepResearch: answer.startsWith("yes") });
-      } catch {
-        clearTimeout(timeout);
-        res.json({ deepResearch: false });
-      }
-    } catch {
-      res.json({ deepResearch: false });
-    }
-  });
-
   // Legacy REST endpoint
   app.post("/api/analyze", async (_req, res) => {
     res.status(200).json({
@@ -1542,6 +1478,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Track active jobs for cancellation
     const activeJobs = new Map<string, AbortController>();
 
+    // Pending deep research confirmations — resolvers keyed by jobId
+    const deepResearchResolvers = new Map<string, (confirmed: boolean) => void>();
+
     // Per-connection analyze rate tracking
     const analyzeTimestamps: number[] = [];
 
@@ -1635,6 +1574,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             controller.abort();
             activeJobs.delete(targetJobId);
           }
+          // Clean up any pending deep research confirmation
+          const resolver = deepResearchResolvers.get(targetJobId);
+          if (resolver) {
+            resolver(false);
+            deepResearchResolvers.delete(targetJobId);
+          }
           // Always acknowledge cancellation so the client can unlock the UI,
           // even if the server-side job already finished and was cleaned up.
           ws.send(JSON.stringify({
@@ -1643,6 +1588,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             status: "completed",
             payload: { message: "Generation cancelled by user" }
           }));
+          return;
+        }
+
+        // Handle deep research confirmation responses from the client
+        if (message.type === "deep_research_response") {
+          const resolver = deepResearchResolvers.get(message.jobId);
+          if (resolver) {
+            resolver(message.confirmed === true);
+            deepResearchResolvers.delete(message.jobId);
+          }
           return;
         }
 
@@ -1668,7 +1623,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             message: userMessage,
             conversationHistory = [],
             conversationId = null,
-            useDeepResearch = false,
             apiKeys,
             presetId = null,
             systemPrompt: clientSystemPrompt = null,
@@ -1783,19 +1737,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const abortController = new AbortController();
           activeJobs.set(jobId, abortController);
 
+          // Build deep research confirmation callback.
+          // When the server analysis recommends deep research, this pauses the
+          // pipeline and sends a confirmation request to the client via WebSocket.
+          const requestDeepResearchConfirmation = (): Promise<boolean> => {
+            return new Promise<boolean>((resolve) => {
+              deepResearchResolvers.set(jobId, resolve);
+              // Safety timeout: if client doesn't respond within 60 seconds, skip deep research
+              setTimeout(() => {
+                if (deepResearchResolvers.has(jobId)) {
+                  deepResearchResolvers.delete(jobId);
+                  resolve(false);
+                }
+              }, 60_000);
+            });
+          };
+
           // Run the analysis job with real-time updates
           const jobResult = await runAnalysisJob(
             {
               jobId,
               message: userMessage,
               conversationHistory,
-              useDeepResearch,
               apiKeys: resolvedKeys,
               userId,
               orgId,
               conversationId: activeConversationId,
               signal: abortController.signal,
               systemPrompt: clientSystemPrompt,
+              requestDeepResearchConfirmation,
             },
             ws
           );
@@ -1806,6 +1776,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           activeJobs.delete(jobId);
+          deepResearchResolvers.delete(jobId);
         }
       } catch (error) {
         console.error("WebSocket message error:", error);

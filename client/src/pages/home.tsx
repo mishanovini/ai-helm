@@ -38,7 +38,7 @@ export default function Home() {
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showDeepResearchModal, setShowDeepResearchModal] = useState(false);
-  const [pendingMessage, setPendingMessage] = useState<string>("");
+  const [pendingDeepResearchJobId, setPendingDeepResearchJobId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasAPIKeys, setHasAPIKeys] = useState(false);
@@ -185,6 +185,19 @@ export default function Home() {
         securityScore: payload.securityScore,
         securityExplanation: payload.securityExplanation
       } as AnalysisData));
+    } else if (phase === "deep_research_confirm" && status === "processing") {
+      // Server's consolidated analysis recommends deep research — ask user
+      addLog("Deep research recommended — awaiting confirmation...", "processing");
+      setPendingDeepResearchJobId(jobId);
+      setShowDeepResearchModal(true);
+    } else if (phase === "deep_research_confirm" && status === "completed") {
+      // Confirmation resolved — pipeline continues
+      setLogs(prev => prev.filter(log => log.message !== "Deep research recommended — awaiting confirmation..."));
+      if (payload?.confirmed) {
+        addLog("Deep research confirmed — selecting research model", "success");
+      } else {
+        addLog("Using standard model instead of deep research", "info");
+      }
     } else if (phase === "promptQuality" && status === "completed") {
       addLog(`Prompt quality: ${payload.promptQuality.score}/100`, "success");
       setAnalysisData(prev => ({
@@ -366,7 +379,7 @@ export default function Home() {
     }
   }, [activeJobId, cancelJob]);
 
-  const simulateAnalysis = async (userMessage: string, useDeepResearch: boolean = false) => {
+  const simulateAnalysis = async (userMessage: string) => {
     setIsProcessing(true);
 
     const apiKeys = getStoredAPIKeys();
@@ -392,7 +405,6 @@ export default function Home() {
         message: userMessage,
         conversationHistory: messages,
         conversationId,
-        useDeepResearch,
         apiKeys: userHasKeys ? apiKeys : { gemini: "", openai: "", anthropic: "" },
         ...(activePreset ? { presetId: activePreset.id, systemPrompt: activePreset.systemPrompt } : {}),
       }
@@ -408,22 +420,10 @@ export default function Home() {
   };
 
   /**
-   * Simple heuristic fallback for when the LLM classify endpoint fails.
-   * Returns true if the prompt expresses research or analytical intent.
+   * Send message handler — adds message to UI and immediately starts
+   * the analysis pipeline. Deep research confirmation (if needed) happens
+   * mid-pipeline via WebSocket, not as a pre-send gate.
    */
-  const shouldPromptDeepResearch = (text: string): boolean => {
-    // Research intent: user is asking to research, analyze, or investigate
-    const researchIntent = /\b(research|investigate|analyze|analyse|examine|evaluate|assess|survey|deep\s*dive|in[- ]depth)\b/i;
-
-    // Comparative/multi-dimensional analysis
-    const comparativeIntent = /\b(compare|contrast|versus|vs\.?)\b.*\b(across|between|with|and)\b/i;
-
-    // Explicit deep-research qualifiers
-    const deepQualifiers = /\b(comprehensive(?:ly)?|thorough(?:ly)?|exhaustive(?:ly)?|detailed\s+(?:analysis|review|report|comparison))\b/i;
-
-    return researchIntent.test(text) || comparativeIntent.test(text) || deepQualifiers.test(text);
-  };
-
   const handleSendMessage = async (content: string) => {
     const timestamp = new Date().toLocaleTimeString('en-US', {
       hour: 'numeric',
@@ -441,44 +441,34 @@ export default function Home() {
     // Allow auto-scroll to fire once for the upcoming assistant response
     hasScrolledToResponseRef.current = false;
 
-    // Determine whether deep research is warranted.
-    // The heuristic catches obvious research intent (research verbs, comparative
-    // language) while the LLM handles nuanced cases. Either triggering is enough
-    // to show the confirmation modal.
-    const heuristicSaysResearch = shouldPromptDeepResearch(content);
-    let llmSaysResearch = false;
-    try {
-      const classifyKeys = getStoredAPIKeys();
-      const response = await fetch("/api/classify-research", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: content, apiKeys: classifyKeys }),
+    // Pipeline starts immediately — deep research is decided server-side
+    await simulateAnalysis(content);
+  };
+
+  /** User confirmed deep research via mid-pipeline modal */
+  const handleDeepResearchConfirm = () => {
+    setShowDeepResearchModal(false);
+    if (pendingDeepResearchJobId) {
+      sendMessage({
+        type: "deep_research_response",
+        jobId: pendingDeepResearchJobId,
+        confirmed: true,
       });
-      const data = await response.json();
-      llmSaysResearch = data.deepResearch === true;
-    } catch {
-      // LLM classify unavailable — heuristic is the sole signal
-    }
-    const needsDeepResearch = heuristicSaysResearch || llmSaysResearch;
-
-    if (needsDeepResearch) {
-      setPendingMessage(content);
-      setShowDeepResearchModal(true);
-    } else {
-      await simulateAnalysis(content, false);
+      setPendingDeepResearchJobId(null);
     }
   };
 
-  const handleDeepResearchConfirm = async () => {
+  /** User declined deep research — use faster model instead */
+  const handleUseFasterAlternative = () => {
     setShowDeepResearchModal(false);
-    await simulateAnalysis(pendingMessage, true);
-    setPendingMessage("");
-  };
-
-  const handleUseFasterAlternative = async () => {
-    setShowDeepResearchModal(false);
-    await simulateAnalysis(pendingMessage, false);
-    setPendingMessage("");
+    if (pendingDeepResearchJobId) {
+      sendMessage({
+        type: "deep_research_response",
+        jobId: pendingDeepResearchJobId,
+        confirmed: false,
+      });
+      setPendingDeepResearchJobId(null);
+    }
   };
 
   const handleSelectConversation = async (id: string | null) => {

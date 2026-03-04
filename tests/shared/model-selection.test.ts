@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MODEL_CATALOG,
   MODEL_PRICING,
-  analyzePrompt,
+  estimateTokens,
   selectOptimalModel,
   selectCheapestModel,
   estimateCost,
@@ -70,78 +70,36 @@ describe("MODEL_CATALOG", () => {
 });
 
 // ============================================================================
-// analyzePrompt
+// estimateTokens
 // ============================================================================
 
-describe("analyzePrompt", () => {
-  it("should detect a simple task from keywords", () => {
-    const result = analyzePrompt("summarize this paragraph for me");
-    expect(result.isSimpleTask).toBe(true);
+describe("estimateTokens", () => {
+  it("should estimate ~1 token per 4 characters", () => {
+    // 40 chars → 10 tokens
+    expect(estimateTokens("This is exactly 40 characters long!!!!!!")).toBe(10);
   });
 
-  it("should detect simple task for short prompts", () => {
-    const result = analyzePrompt("Hello");
-    expect(result.isSimpleTask).toBe(true);
+  it("should round up partial tokens", () => {
+    // 5 chars → ceil(5/4) = 2 tokens
+    expect(estimateTokens("Hello")).toBe(2);
   });
 
-  it("should detect coding task type", () => {
-    const result = analyzePrompt("Write a function to sort an array using quicksort");
-    expect(result.taskType).toBe("coding");
+  it("should return 0 for empty string", () => {
+    expect(estimateTokens("")).toBe(0);
   });
 
-  it("should detect math task type", () => {
-    const result = analyzePrompt("Prove the fundamental theorem of calculus");
-    expect(result.taskType).toBe("math");
-  });
-
-  it("should detect creative task type", () => {
-    const result = analyzePrompt("Write a short story about a robot");
-    expect(result.taskType).toBe("creative");
-  });
-
-  it("should detect conversation task type", () => {
-    const result = analyzePrompt("Let's chat and talk about philosophy");
-    expect(result.taskType).toBe("conversation");
-  });
-
-  it("should detect analysis task type", () => {
-    const result = analyzePrompt("Analyze the economic factors behind inflation");
-    expect(result.taskType).toBe("analysis");
-  });
-
-  it("should detect speed-critical prompts", () => {
-    const result = analyzePrompt("I need a quick answer to this immediately");
-    expect(result.isSpeedCritical).toBe(true);
-  });
-
-  it("should detect deep reasoning requirements", () => {
-    const result = analyzePrompt(
-      "Provide a comprehensive and detailed analysis of quantum computing applications " +
-      "in cryptography, covering all major protocols, their security implications, and " +
-      "future research directions. Include a thorough comparison of different approaches " +
-      "and detailed technical explanations for each."
-    );
-    expect(result.requiresDeepReasoning).toBe(true);
-  });
-
-  it("should estimate tokens roughly at 1 token per 4 chars", () => {
-    const result = analyzePrompt("This is exactly 40 characters long!!!!!!");
-    expect(result.estimatedTokens).toBe(10);
-  });
-
-  it("should detect multimodal requirements", () => {
-    const result = analyzePrompt("Describe this image of a cat");
-    expect(result.requiresMultimodal).toBe(true);
+  it("should handle large inputs", () => {
+    const longText = "x".repeat(10000);
+    expect(estimateTokens(longText)).toBe(2500);
   });
 });
 
 // ============================================================================
-// selectOptimalModel (keyword fallback — no LLM override)
+// selectOptimalModel — conservative defaults (no LLM override)
 // ============================================================================
 
-describe("selectOptimalModel", () => {
+describe("selectOptimalModel without LLM override", () => {
   const allProviders: AvailableProviders = { gemini: true, openai: true, anthropic: true };
-  const geminiOnly: AvailableProviders = { gemini: true, openai: false, anthropic: false };
   const openaiOnly: AvailableProviders = { gemini: false, openai: true, anthropic: false };
 
   it("should throw when no providers available", () => {
@@ -149,56 +107,15 @@ describe("selectOptimalModel", () => {
       .toThrow("No API providers available");
   });
 
-  it("should select a lightweight model for simple tasks", () => {
-    const result = selectOptimalModel("summarize this text", allProviders);
+  it("should select a model even without LLM analysis (conservative defaults)", () => {
+    const result = selectOptimalModel("What is the capital of France?", allProviders);
     expect(result.primary).toBeDefined();
-    // Should pick a cost-efficient model
-    expect(["ultra-low", "low"]).toContain(result.primary.costTier);
-  });
-
-  it("should select a model with coding strength for coding tasks", () => {
-    const result = selectOptimalModel(
-      "Refactor this complex distributed system with proper error handling and architect a microservices pattern",
-      allProviders
-    );
-    expect(result.primary).toBeDefined();
-    expect(result.reasoning.toLowerCase()).toContain("cod");
-  });
-
-  it("should prefer Gemini Flash-Lite as cheapest for all providers", () => {
-    const result = selectOptimalModel("Hello there!", allProviders);
-    expect(result.primary.model).toBe("gemini-2.5-flash-lite");
-  });
-
-  it("should prefer GPT-5 Nano when only OpenAI available for simple tasks", () => {
-    const result = selectOptimalModel("Hello there!", openaiOnly);
-    expect(result.primary.model).toBe("gpt-5-nano");
+    expect(result.reasoning).toBeDefined();
   });
 
   it("should return a fallback when possible", () => {
     const result = selectOptimalModel("hello", allProviders);
     expect(result.fallback).toBeDefined();
-  });
-
-  it("should route 'write me a letter' to a premium creative model", () => {
-    const result = selectOptimalModel("write me a letter about the meaning of life", allProviders);
-    // Should NOT pick an ultra-low cost model — writing tasks need premium
-    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
-  });
-
-  it("should route 'draft an email' to a premium creative model", () => {
-    const result = selectOptimalModel("draft an email to my manager about a project update", allProviders);
-    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
-  });
-
-  it("should route 'compose a speech' to a premium creative model", () => {
-    const result = selectOptimalModel("compose a speech for my sister's wedding", allProviders);
-    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
-  });
-
-  it("should route short creative prompts with generation verbs to premium models", () => {
-    const result = selectOptimalModel("write me a poem about the ocean", allProviders);
-    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
   });
 
   it("should handle large context by selecting Gemini Pro", () => {
@@ -219,40 +136,9 @@ describe("selectOptimalModel", () => {
 
 describe("selectOptimalModel with LLM override", () => {
   const allProviders: AvailableProviders = { gemini: true, openai: true, anthropic: true };
+  const openaiOnly: AvailableProviders = { gemini: false, openai: true, anthropic: false };
 
-  it("should prevent false speed-critical from keywords when LLM says not speed-critical", () => {
-    // Message contains "quick" but LLM correctly identifies it as a creative task
-    const result = selectOptimalModel(
-      "write me a quick poem about the ocean",
-      allProviders,
-      makeLLMOverride({
-        taskType: "creative",
-        isSpeedCritical: false,
-        isSimpleTask: false,
-        isSubstantiveCreative: true,
-      }),
-    );
-    // Should route to a creative model, NOT a speed-optimized lightweight one
-    expect(result.reasoning.toLowerCase()).not.toContain("speed");
-    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
-  });
-
-  it("should route substantive creative tasks to premium models via LLM override", () => {
-    const result = selectOptimalModel(
-      "Can you write a story about a robot?",
-      allProviders,
-      makeLLMOverride({
-        taskType: "creative",
-        isSubstantiveCreative: true,
-        isSimpleTask: false,
-      }),
-    );
-    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
-    expect(result.reasoning.toLowerCase()).toContain("creative");
-  });
-
-  it("should route to lightweight model when LLM says task is simple", () => {
-    // Even with a longer message, LLM says it's simple
+  it("should route simple tasks to lightweight models", () => {
     const result = selectOptimalModel(
       "What is the capital of France?",
       allProviders,
@@ -265,7 +151,21 @@ describe("selectOptimalModel with LLM override", () => {
     expect(["ultra-low", "low"]).toContain(result.primary.costTier);
   });
 
-  it("should route to premium model when LLM detects deep reasoning", () => {
+  it("should route substantive creative tasks to premium models", () => {
+    const result = selectOptimalModel(
+      "Write me a story about a robot",
+      allProviders,
+      makeLLMOverride({
+        taskType: "creative",
+        isSubstantiveCreative: true,
+        isSimpleTask: false,
+      }),
+    );
+    expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
+    expect(result.reasoning.toLowerCase()).toContain("creative");
+  });
+
+  it("should route deep reasoning tasks to premium models", () => {
     const result = selectOptimalModel(
       "Explain quantum entanglement",
       allProviders,
@@ -276,13 +176,12 @@ describe("selectOptimalModel with LLM override", () => {
         isSimpleTask: false,
       }),
     );
-    // Should either match analysis step or deep reasoning step — both use premium models
     expect(["medium", "high", "premium"]).toContain(result.primary.costTier);
   });
 
-  it("should use speed-critical routing only when LLM confirms speed is the priority", () => {
+  it("should use speed-critical routing when LLM confirms speed priority", () => {
     const result = selectOptimalModel(
-      "I need an answer right now ASAP",
+      "I need an answer right now",
       allProviders,
       makeLLMOverride({
         taskType: "general",
@@ -293,10 +192,9 @@ describe("selectOptimalModel with LLM override", () => {
     expect(result.reasoning.toLowerCase()).toContain("speed");
   });
 
-  it("should not trigger speed-critical when LLM says false even with speed keywords", () => {
-    // Message has "fast" but LLM says it's not speed-critical
+  it("should NOT trigger speed-critical when LLM says false", () => {
     const result = selectOptimalModel(
-      "How fast is the speed of light in a vacuum?",
+      "How fast is the speed of light?",
       allProviders,
       makeLLMOverride({
         taskType: "general",
@@ -305,6 +203,30 @@ describe("selectOptimalModel with LLM override", () => {
       }),
     );
     expect(result.reasoning.toLowerCase()).not.toContain("speed-critical");
+  });
+
+  it("should route complex coding tasks to models with coding strength", () => {
+    const result = selectOptimalModel(
+      "Write a Python function to sort an array",
+      allProviders,
+      makeLLMOverride({
+        taskType: "coding",
+        complexity: "complex",
+        requiresDeepReasoning: true,
+        isSimpleTask: false,
+      }),
+    );
+    expect(result.primary).toBeDefined();
+    expect(result.reasoning.toLowerCase()).toContain("cod");
+  });
+
+  it("should prefer GPT-5 Nano when only OpenAI available for simple tasks", () => {
+    const result = selectOptimalModel(
+      "Hello there!",
+      openaiOnly,
+      makeLLMOverride({ taskType: "general", isSimpleTask: true }),
+    );
+    expect(result.primary.model).toBe("gpt-5-nano");
   });
 });
 
@@ -330,7 +252,6 @@ describe("selectOptimalModel with deep research", () => {
   });
 
   it("should route to premium models when external deep research flag is set", () => {
-    // Even without LLM recommending it, external flag forces deep research
     const result = selectOptimalModel(
       "Tell me about machine learning",
       allProviders,
@@ -342,7 +263,6 @@ describe("selectOptimalModel with deep research", () => {
   });
 
   it("should prioritize deep research over lightweight model routing", () => {
-    // Task is simple but deep research is requested — should NOT route to lightweight
     const result = selectOptimalModel(
       "What is photosynthesis?",
       allProviders,
@@ -482,7 +402,7 @@ describe("selectOptimalModel with custom taskTypes", () => {
 
   it("should fall through switch to default for custom types", () => {
     const result = selectOptimalModel(
-      "Research legal precedents for intellectual property case involving software patents. Analyze multiple jurisdictions.",
+      "Research legal precedents for intellectual property case",
       allProviders,
       makeLLMOverride({ taskType: "legal-research", complexity: "complex" }),
     );

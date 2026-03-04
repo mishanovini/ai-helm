@@ -1,12 +1,12 @@
 /**
  * Intelligent Model Selection Decision Tree
  *
- * Selects the optimal AI model based on:
- * - Task complexity and type
- * - Context size requirements
- * - Speed vs quality trade-offs
- * - Available API providers
- * - Cost optimization
+ * Selects the optimal AI model based on LLM-derived classification signals
+ * from the consolidated analysis pipeline. All classification decisions are
+ * made by the LLM — no keyword or regex heuristics are used.
+ *
+ * When LLM analysis is unavailable (API failure), conservative defaults
+ * route the prompt to a capable mid-tier model.
  *
  * Model IDs are resolved at runtime through the alias system
  * (shared/model-aliases.ts), so they auto-update when new versions
@@ -38,16 +38,6 @@ export interface AvailableProviders {
   gemini: boolean;
   openai: boolean;
   anthropic: boolean;
-}
-
-export interface PromptAnalysis {
-  estimatedTokens: number;
-  isSimpleTask: boolean;
-  isSpeedCritical: boolean;
-  /** Task type — one of the 6 core types or a custom type from router rules. */
-  taskType: string;
-  requiresMultimodal: boolean;
-  requiresDeepReasoning: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,48 +99,15 @@ function r(alias: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Prompt Analysis
+// Token Estimation
 // ---------------------------------------------------------------------------
 
 /**
- * Analyzes the user prompt to determine task characteristics
+ * Estimate the number of tokens in a prompt using character-based arithmetic.
+ * Approximately 1 token per 4 characters — not classification, just math.
  */
-export function analyzePrompt(prompt: string): PromptAnalysis {
-  const lowerPrompt = prompt.toLowerCase();
-  const estimatedTokens = Math.ceil(prompt.length / 4);
-
-  const simpleKeywords = ["translate", "summarize", "what is", "define", "explain simply", "format", "list"];
-  const isSimpleTask = simpleKeywords.some((kw) => lowerPrompt.includes(kw)) || prompt.length < 200;
-
-  const speedKeywords = ["quick", "fast", "urgent", "real-time", "immediately"];
-  const isSpeedCritical = speedKeywords.some((kw) => lowerPrompt.includes(kw));
-
-  let taskType = "general";
-  if (lowerPrompt.match(/\b(code|coding|program|debug|refactor|function|api|bug)\b/)) {
-    taskType = "coding";
-  } else if (lowerPrompt.match(/\b(math|calculate|equation|solve|theorem|proof)\b/)) {
-    taskType = "math";
-  } else if (lowerPrompt.match(/\b(write|compose|draft|craft|author|story|creative|blog|article|poem|letter|email|speech|essay|script|narrative)\b/)) {
-    taskType = "creative";
-  } else if (lowerPrompt.match(/\b(chat|talk|discuss|conversation)\b/)) {
-    taskType = "conversation";
-  } else if (lowerPrompt.match(/\b(analyze|research|study|investigate|examine)\b/)) {
-    taskType = "analysis";
-  }
-
-  const requiresMultimodal = lowerPrompt.match(/\b(image|video|audio|picture|photo|diagram)\b/) !== null;
-
-  const reasoningKeywords = ["complex", "difficult", "deep", "thorough", "comprehensive", "detailed analysis"];
-  const requiresDeepReasoning = reasoningKeywords.some((kw) => lowerPrompt.includes(kw)) || prompt.length > 1000;
-
-  return {
-    estimatedTokens,
-    isSimpleTask,
-    isSpeedCritical,
-    taskType,
-    requiresMultimodal,
-    requiresDeepReasoning,
-  };
+export function estimateTokens(prompt: string): number {
+  return Math.ceil(prompt.length / 4);
 }
 
 // ---------------------------------------------------------------------------
@@ -158,11 +115,8 @@ export function analyzePrompt(prompt: string): PromptAnalysis {
 // ---------------------------------------------------------------------------
 
 /**
- * Pre-computed analysis from an LLM (consolidated analysis) that overrides
- * the keyword-based heuristic in `analyzePrompt()`.
- *
- * When provided, ALL classification fields come from the LLM. Keyword
- * heuristics are only used as a fallback when LLM analysis is unavailable.
+ * LLM-derived classification from consolidated analysis.
+ * All classification decisions come from the LLM — no keyword fallbacks.
  */
 export interface LLMAnalysisOverride {
   /** Core or custom task type string. Custom types fall through to default model selection. */
@@ -186,16 +140,14 @@ export interface LLMAnalysisOverride {
  * Main decision tree for model selection.
  * All model references use aliases resolved at call time.
  *
- * When `llmAnalysis` is provided, the LLM's classification fully replaces
- * keyword heuristics for task type, speed criticality, creativity, reasoning
- * needs, etc. Keywords are only used as a fallback when LLM analysis is
- * unavailable (e.g., the analysis API call failed).
+ * When `llmAnalysis` is provided, the LLM's classification drives all
+ * decisions. When unavailable (API failure), conservative defaults route
+ * the prompt to a capable mid-tier model via the default fallback step.
  *
- * @param prompt - The user's latest message (NOT full conversation history)
+ * @param prompt - The user's latest message (used only for token estimation)
  * @param availableProviders - Which API providers have keys configured
- * @param llmAnalysis - Optional LLM-derived analysis to replace keyword heuristics.
- * @param useDeepResearch - Optional external deep research flag (from client modal).
- *   True if the user explicitly confirmed deep research mode.
+ * @param llmAnalysis - Optional LLM-derived analysis signals.
+ * @param useDeepResearch - Optional external deep research flag (from mid-pipeline confirmation).
  */
 export function selectOptimalModel(
   prompt: string,
@@ -203,21 +155,19 @@ export function selectOptimalModel(
   llmAnalysis?: LLMAnalysisOverride,
   useDeepResearch?: boolean,
 ): { primary: ModelOption; fallback: ModelOption | null; reasoning: string } {
-  const lowerPrompt = prompt.toLowerCase();
-  const heuristicAnalysis = analyzePrompt(prompt);
+  const estimatedTokenCount = estimateTokens(prompt);
 
-  // When LLM analysis is available, trust it fully for classification.
-  // Only estimatedTokens comes from the heuristic (char-based math).
-  const analysis: PromptAnalysis = llmAnalysis
-    ? {
-        estimatedTokens: heuristicAnalysis.estimatedTokens,
-        taskType: llmAnalysis.taskType,
-        isSimpleTask: llmAnalysis.isSimpleTask,
-        isSpeedCritical: llmAnalysis.isSpeedCritical,
-        requiresDeepReasoning: llmAnalysis.requiresDeepReasoning || llmAnalysis.complexity === "complex",
-        requiresMultimodal: llmAnalysis.requiresMultimodal,
-      }
-    : heuristicAnalysis;
+  // When LLM analysis is available, use it. Otherwise conservative defaults.
+  const taskType = llmAnalysis?.taskType ?? "general";
+  const isSimpleTask = llmAnalysis?.isSimpleTask ?? false;
+  const isSpeedCritical = llmAnalysis?.isSpeedCritical ?? false;
+  const requiresDeepReasoning = llmAnalysis
+    ? (llmAnalysis.requiresDeepReasoning || llmAnalysis.complexity === "complex")
+    : false;
+  const requiresMultimodal = llmAnalysis?.requiresMultimodal ?? false;
+  const isSubstantiveCreative = llmAnalysis?.isSubstantiveCreative ?? false;
+  const deepResearchActive = !!(llmAnalysis?.useDeepResearch || useDeepResearch);
+  const needsPremiumModel = requiresDeepReasoning || isSubstantiveCreative;
 
   const catalog = buildCatalog();
   const pricing = buildPricing();
@@ -227,21 +177,18 @@ export function selectOptimalModel(
     throw new Error("No API providers available. Please configure at least one API key in Settings.");
   }
 
-  // Deep research is active if the LLM recommends it OR the user confirmed via modal
-  const deepResearchActive = !!(llmAnalysis?.useDeepResearch || useDeepResearch);
-
   // STEP 1: Check if context size requires specific models
-  if (analysis.estimatedTokens > 200000) {
+  if (estimatedTokenCount > 200000) {
     const geminiPro = availableModels.find((m) => m.model === r("gemini-pro"));
     if (geminiPro) {
       return {
         primary: geminiPro,
         fallback: null,
-        reasoning: `Large context (${analysis.estimatedTokens.toLocaleString()} tokens) requires Gemini Pro's 1M token window`,
+        reasoning: `Large context (${estimatedTokenCount.toLocaleString()} tokens) requires Gemini Pro's 1M token window`,
       };
     }
     throw new Error(
-      `Prompt too large (${analysis.estimatedTokens.toLocaleString()} tokens). Please add Gemini API key to handle large contexts.`
+      `Prompt too large (${estimatedTokenCount.toLocaleString()} tokens). Please add Gemini API key to handle large contexts.`
     );
   }
 
@@ -263,43 +210,8 @@ export function selectOptimalModel(
     }
   }
 
-  // STEP 3: Default to lightweight models unless there's a clear reason not to
-  //
-  // When LLM analysis is available, use its signals directly.
-  // When falling back to keywords, use the original regex-based detection.
-  const isSubstantiveCreative = llmAnalysis
-    ? llmAnalysis.isSubstantiveCreative
-    : (
-        analysis.taskType === "creative" &&
-        (
-          // Explicit content types (broad list of writing formats)
-          lowerPrompt.match(/\b(article|essay|blog\s*post|screenplay|story|novel|chapter|letter|email|speech|report|memo|proposal|presentation|script|review|critique|outline|poem|song|monologue|dialogue|narrative)\b/) ||
-          // Quality descriptors that signal substantive output is expected
-          lowerPrompt.match(/\b(thoughtful|detailed|comprehensive|in-depth|nuanced|elaborate|polished|professional|formal|creative)\b/) ||
-          // Generation verbs followed by an article/determiner — catches "write me a letter", "draft a proposal", etc.
-          lowerPrompt.match(/\b(write|compose|draft|craft|create|author)\b[\s\S]*?\b(a|an|the|my|our|this|me)\b/)
-        )
-      );
-
-  const needsPremiumModel = llmAnalysis
-    ? (
-        analysis.requiresDeepReasoning ||
-        isSubstantiveCreative
-      )
-    : (
-        // Keyword-based fallback logic (unchanged)
-        analysis.requiresDeepReasoning ||
-        isSubstantiveCreative ||
-        (analysis.taskType === "coding" &&
-          (lowerPrompt.includes("refactor") ||
-            lowerPrompt.includes("architect") ||
-            lowerPrompt.includes("complex") ||
-            (lowerPrompt.includes("debug") && prompt.length > 500))) ||
-        (analysis.taskType === "math" && lowerPrompt.includes("prove")) ||
-        prompt.length > 2000
-      );
-
-  if (!needsPremiumModel && !analysis.isSpeedCritical) {
+  // STEP 3: Default to lightweight models unless premium is needed
+  if (!needsPremiumModel && !isSpeedCritical) {
     const lightweightPriority = [
       r("gemini-flash-lite"),
       r("gpt-nano"),
@@ -325,7 +237,7 @@ export function selectOptimalModel(
   }
 
   // STEP 4: Speed-critical tasks
-  if (analysis.isSpeedCritical) {
+  if (isSpeedCritical) {
     const fastModels = availableModels
       .filter((m) => m.speedTier === "ultra-fast" || m.speedTier === "fast")
       .sort((a, b) => {
@@ -343,7 +255,7 @@ export function selectOptimalModel(
   }
 
   // STEP 5: Task-specific model selection (for premium tasks only)
-  switch (analysis.taskType) {
+  switch (taskType) {
     case "coding": {
       const codingPriority = [
         r("claude-sonnet"),
@@ -433,7 +345,7 @@ export function selectOptimalModel(
   }
 
   // STEP 6: Deep reasoning tasks
-  if (analysis.requiresDeepReasoning) {
+  if (requiresDeepReasoning) {
     const reasoningPriority = [r("claude-opus"), r("claude-sonnet"), r("gemini-pro"), r("gpt")];
     for (const modelId of reasoningPriority) {
       const model = availableModels.find((m) => m.model === modelId);
@@ -448,7 +360,7 @@ export function selectOptimalModel(
   }
 
   // STEP 7: Multimodal requirements
-  if (analysis.requiresMultimodal) {
+  if (requiresMultimodal) {
     const multimodalPriority = [r("gemini-pro"), r("gemini-flash"), r("gpt")];
     for (const modelId of multimodalPriority) {
       const model = availableModels.find((m) => m.model === modelId);

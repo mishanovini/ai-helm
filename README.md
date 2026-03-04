@@ -278,7 +278,6 @@ See the [Demo Mode](#demo-mode) section below for details.
 ### API Key Validation
 - `POST /api/validate-keys` - Bulk validate API keys (all provided must pass)
 - `POST /api/validate-key` - Single key inline validation
-- `POST /api/classify-research` - LLM-based deep research classification
 
 ### Admin (requires admin role or ADMIN_SECRET header)
 - `POST /api/admin/verify-secret` - Verify admin secret for no-auth mode access
