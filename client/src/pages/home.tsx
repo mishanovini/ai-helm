@@ -441,8 +441,12 @@ export default function Home() {
     // Allow auto-scroll to fire once for the upcoming assistant response
     hasScrolledToResponseRef.current = false;
 
-    // Use LLM to classify whether deep research is warranted, with heuristic fallback
-    let needsDeepResearch = false;
+    // Determine whether deep research is warranted.
+    // The heuristic catches obvious research intent (research verbs, comparative
+    // language) while the LLM handles nuanced cases. Either triggering is enough
+    // to show the confirmation modal.
+    const heuristicSaysResearch = shouldPromptDeepResearch(content);
+    let llmSaysResearch = false;
     try {
       const classifyKeys = getStoredAPIKeys();
       const response = await fetch("/api/classify-research", {
@@ -451,11 +455,11 @@ export default function Home() {
         body: JSON.stringify({ message: content, apiKeys: classifyKeys }),
       });
       const data = await response.json();
-      needsDeepResearch = data.deepResearch === true;
+      llmSaysResearch = data.deepResearch === true;
     } catch {
-      // LLM classify failed — fall back to heuristic
-      needsDeepResearch = shouldPromptDeepResearch(content);
+      // LLM classify unavailable — heuristic is the sole signal
     }
+    const needsDeepResearch = heuristicSaysResearch || llmSaysResearch;
 
     if (needsDeepResearch) {
       setPendingMessage(content);
