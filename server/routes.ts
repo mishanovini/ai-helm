@@ -299,9 +299,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const apiKey = keys[model.provider] || "";
 
-      // 3-second timeout — if LLM takes too long, default to not deep research
+      // 5-second timeout — if LLM takes too long, fall back to heuristic on client
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
+      const timeout = setTimeout(() => controller.abort(), 5000);
 
       try {
         const response = await Promise.race([
@@ -309,10 +309,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             model,
             apiKey,
             "You classify user prompts. Answer with only 'yes' or 'no'.",
-            `Does this prompt require deep, multi-source research that would benefit from extended analysis taking several minutes? Only say 'yes' if the user is asking for comprehensive research, detailed analysis from multiple angles, or investigation that requires synthesizing many sources.\n\nPrompt: "${message}"`
+            `Would this prompt benefit from deep research mode (a premium model with extended processing time)?\n\nSay 'yes' if ANY of these apply:\n- The user explicitly asks to research, analyze, or investigate a topic\n- The prompt asks for comparison, evaluation, or synthesis across multiple dimensions\n- The prompt requests data gathering, market analysis, or historical review\n- The prompt contains multiple complex sub-questions\n- The task would clearly benefit from a more capable, slower model\n\nSay 'no' for simple questions, creative writing, coding help, translations, or casual conversation.\n\nPrompt: "${message}"`
           ),
           new Promise<string>((_, reject) =>
-            setTimeout(() => reject(new Error("timeout")), 3000)
+            setTimeout(() => reject(new Error("timeout")), 5000)
           ),
         ]);
 

@@ -408,38 +408,52 @@ export default function Home() {
   };
 
   /**
-   * Determines whether a prompt warrants deep research mode.
-   * Uses heuristic signals: word count, multi-part structure, explicit research
-   * intent, and presence of complex analytical keywords.
+   * Heuristic fallback to determine whether a prompt warrants deep research.
+   * Used only when the LLM classify endpoint is unavailable or times out.
+   * Checks for explicit research verbs, analytical keywords, multi-part
+   * structure, and prompt length.
    */
   const shouldPromptDeepResearch = (text: string): boolean => {
     const lower = text.toLowerCase();
     const words = text.split(/\s+/).filter(Boolean);
     const wordCount = words.length;
 
-    // Short prompts never trigger deep research
-    if (wordCount < 30) return false;
+    // Very short prompts never trigger deep research
+    if (wordCount < 15) return false;
 
     let signals = 0;
 
     // Long, detailed prompts suggest complex research needs
     if (wordCount > 100) signals += 2;
-    else if (wordCount > 60) signals += 1;
+    else if (wordCount > 50) signals += 1;
 
     // Multi-part requests (numbered lists, bullet points, semicolons)
     const hasMultipleParts = /(\d+[\.\)]\s)|(\n\s*[-•*]\s)|(;\s*\w)/.test(text);
     if (hasMultipleParts) signals += 1;
 
-    // Explicit deep research intent
-    const deepResearchPattern = /\b(deep\s*(?:dive|research|analysis|investigation)|comprehensive\s*(?:review|analysis|study)|thorough(?:ly)?\s*(?:analyze|research|investigate|examine))\b/i;
-    if (deepResearchPattern.test(text)) signals += 2;
+    // Explicit research intent — verbs that signal a research/analysis task
+    const researchVerbs = /\b(research|investigate|analyze|analyse|examine|study|evaluate|assess|review|survey)\b/i;
+    if (researchVerbs.test(text)) signals += 2;
 
-    // Complex analytical keywords (need multiple to count)
+    // Explicit deep-research qualifiers (strong signal)
+    const deepResearchPattern = /\b(deep\s*(?:dive|research|analysis|investigation)|comprehensive(?:ly)?|thorough(?:ly)?|in[- ]depth|exhaustive(?:ly)?|detailed\s+(?:analysis|review|comparison|report))\b/i;
+    if (deepResearchPattern.test(text)) signals += 1;
+
+    // Comparative or multi-dimensional analysis
+    const comparativePattern = /\b(compare|contrast|versus|vs\.?|how does.*compare|across\s+(?:industries|sectors|regions|countries|categories))\b/i;
+    if (comparativePattern.test(text)) signals += 1;
+
+    // Temporal research scope ("over the past X months/years", "last 12 months")
+    const temporalPattern = /\b(over the (?:past|last)|in the (?:past|last)|since \d{4}|from \d{4}|year[\s-]over[\s-]year|quarter[\s-]over[\s-]quarter)\b/i;
+    if (temporalPattern.test(text)) signals += 1;
+
+    // Analytical keywords (need multiple to count)
     const analyticalTerms = [
       "compare", "contrast", "evaluate", "synthesize", "implications",
       "trade-offs", "tradeoffs", "pros and cons", "advantages", "disadvantages",
       "literature", "sources", "citations", "evidence", "methodology",
-      "systematic", "comprehensive", "in-depth", "exhaustive"
+      "systematic", "comprehensive", "in-depth", "exhaustive", "market",
+      "industry", "trends", "forecast", "benchmark", "landscape"
     ];
     const matchCount = analyticalTerms.filter(term => lower.includes(term)).length;
     if (matchCount >= 3) signals += 2;
@@ -447,7 +461,7 @@ export default function Home() {
 
     // Multiple explicit questions suggest a research task
     const questionCount = (text.match(/\?/g) || []).length;
-    if (questionCount >= 3) signals += 1;
+    if (questionCount >= 2) signals += 1;
 
     // Require at least 3 signals to suggest deep research
     return signals >= 3;

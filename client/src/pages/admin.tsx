@@ -527,10 +527,8 @@ function AdminDashboard({ canQuery }: { canQuery: boolean }) {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">{user.totalMessages}</TableCell>
-                        <TableCell className="text-right">
-                          <span className={user.averagePromptQuality < 30 ? "text-destructive" : ""}>
-                            {user.averagePromptQuality || "---"}
-                          </span>
+                        <TableCell className="text-right text-muted-foreground">
+                          {user.averagePromptQuality || "---"}
                         </TableCell>
                         <TableCell className="text-right">
                           <span className={user.securityFlags > 5 ? "text-destructive font-bold" : ""}>
