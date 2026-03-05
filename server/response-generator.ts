@@ -303,3 +303,90 @@ async function streamAnthropicResponse(
 
   return fullText || "I apologize, but I couldn't generate a response at this time.";
 }
+
+// ============================================================================
+// Gemini Deep Research (Interactions API)
+// ============================================================================
+
+/** Deep Research agent model — Google's purpose-built multi-source research agent */
+const DEEP_RESEARCH_MODEL = "deep-research-pro-preview-12-2025";
+
+/** Polling interval in ms when waiting for deep research to complete */
+const DEEP_RESEARCH_POLL_INTERVAL = 5_000;
+
+/**
+ * Generate a response using Gemini's Deep Research API.
+ *
+ * Unlike standard generation, deep research is a long-running background task
+ * that uses multi-source web grounding. The function polls for completion and
+ * sends progress updates via the `onProgress` callback.
+ *
+ * @param prompt - The optimized research prompt
+ * @param apiKey - Gemini API key
+ * @param onProgress - Called periodically with progress text (shown as streaming tokens to the user)
+ * @param signal - Optional AbortSignal for cancellation
+ * @returns The final research response text
+ */
+export async function generateDeepResearchResponse(
+  prompt: string,
+  apiKey: string,
+  onProgress: (message: string) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  const ai = new GoogleGenAI({ apiKey });
+
+  // Start deep research interaction (non-blocking — runs in background)
+  const interaction = await ai.interactions.create({
+    input: prompt,
+    agent: DEEP_RESEARCH_MODEL,
+    background: true,
+  });
+
+  const interactionId = interaction.id;
+  if (!interactionId) {
+    throw new Error("Deep research failed to start: no interaction ID returned");
+  }
+
+  onProgress("\n🔬 *Deep research started — analyzing multiple sources...*\n\n");
+
+  // Poll for completion
+  let pollCount = 0;
+  while (true) {
+    if (signal?.aborted) {
+      // Best-effort cancellation
+      try { await ai.interactions.cancel(interactionId); } catch { /* ignore */ }
+      throw new DOMException("Aborted", "AbortError");
+    }
+
+    await new Promise(resolve => setTimeout(resolve, DEEP_RESEARCH_POLL_INTERVAL));
+    pollCount++;
+
+    const result = await ai.interactions.get(interactionId);
+
+    if (result.status === "completed") {
+      // Extract final text from outputs (Content_2 is a union; cast to access .text)
+      const outputs = result.outputs || [];
+      const lastOutput = outputs.length > 0 ? outputs[outputs.length - 1] : null;
+      const finalText = lastOutput && "text" in lastOutput
+        ? (lastOutput as any).text || ""
+        : "";
+
+      if (!finalText) {
+        throw new Error("Deep research completed but returned no text");
+      }
+
+      return finalText;
+    }
+
+    if (result.status === "failed") {
+      const errorMsg = (result as any).error || "Unknown deep research error";
+      throw new Error(`Deep research failed: ${errorMsg}`);
+    }
+
+    // Still running — send periodic progress updates
+    if (pollCount % 3 === 0) {
+      const elapsed = Math.round((pollCount * DEEP_RESEARCH_POLL_INTERVAL) / 1000);
+      onProgress(`*Researching... (${elapsed}s elapsed)*\n`);
+    }
+  }
+}

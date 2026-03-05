@@ -194,7 +194,7 @@ export function selectOptimalModel(
 
   // STEP 2: Deep research mode — premium models with large context windows
   if (deepResearchActive) {
-    const researchPriority = [r("claude-opus"), r("gemini-pro"), r("claude-sonnet"), r("gpt")];
+    const researchPriority = [r("gemini-pro"), r("claude-opus"), r("claude-sonnet"), r("gpt")];
     for (const modelId of researchPriority) {
       const model = availableModels.find((m) => m.model === modelId);
       if (model) {
@@ -204,7 +204,7 @@ export function selectOptimalModel(
         return {
           primary: model,
           fallback: fallback || null,
-          reasoning: `Deep research mode. ${model.displayName} provides comprehensive analysis capabilities`,
+          reasoning: `Deep research mode. Using Gemini Deep Research for comprehensive multi-source analysis`,
         };
       }
     }

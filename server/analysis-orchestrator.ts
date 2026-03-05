@@ -5,6 +5,7 @@ import {
   tuneParameters,
   validateResponse
 } from "./universal-analysis";
+import { generateDeepResearchResponse } from "./response-generator";
 import { scanForSensitiveData } from "./dlp-scanner";
 import {
   selectOptimalModel,
@@ -331,6 +332,10 @@ export async function runAnalysisJob(
       useDeepResearch = await job.requestDeepResearchConfirmation();
 
       sendUpdate("deep_research_confirm", "completed", { confirmed: useDeepResearch });
+
+      // Sync analysis value with user's choice so downstream logic
+      // (model selection, logging) reflects the confirmed decision
+      analysis.useDeepResearch = useDeepResearch;
     }
 
     // ========================================================================
@@ -374,7 +379,7 @@ export async function runAnalysisJob(
           requiresMultimodal: analysis.requiresMultimodal,
           isSubstantiveCreative: analysis.isSubstantiveCreative,
           useDeepResearch: analysis.useDeepResearch,
-        }, useDeepResearch);
+        });
         results.selectedModel = selection.primary;
         results.modelReasoning = selection.reasoning;
         results.fallbackModel = selection.fallback;
@@ -479,24 +484,80 @@ export async function runAnalysisJob(
     phaseStart = Date.now();
 
     // ========================================================================
-    // Phase 5+6: Generate AI Response with Provider Failover + Validation Retry
+    // Phase 5+6: Generate AI Response
     // ========================================================================
+
+    let aiResponse = "";
+    let currentModel: ModelOption = results.selectedModel;
+    let retryCount = 0;
+    let totalGenerationMs = 0;
+    let totalValidationMs = 0;
+    const providerFailures: ProviderFailure[] = [];
+    const retryAttempts: RetryAttempt[] = [];
+
+    // ---- Deep Research path: Gemini Interactions API (long-running) ----
+    if (useDeepResearch && apiKeys.gemini) {
+      sendUpdate("generating", "processing", { deepResearch: true });
+      const genStart = Date.now();
+      try {
+        aiResponse = await generateDeepResearchResponse(
+          results.optimizedPrompt,
+          apiKeys.gemini,
+          (progress) => sendUpdate("response_chunk", "processing", { token: progress }),
+          job.signal,
+        );
+        phaseTimings.generationMs = Date.now() - genStart;
+
+        sendUpdate("generating", "completed", {
+          message: `Deep research completed using Gemini Deep Research`
+        });
+
+        // Send final response
+        sendUpdate("response", "completed", { response: aiResponse });
+
+        // Run validation once for analytics (non-blocking)
+        try {
+          const validation = await validateResponse(
+            safeMessage, results.intent, aiResponse, analysisModel, analysisApiKey
+          );
+          sendUpdate("validating", "completed", {
+            userSummary: validation.userSummary,
+            validation: validation.validation,
+            passed: validation.passed,
+          });
+          sendUpdate("complete", "completed", {
+            userSummary: validation.userSummary,
+            validation: validation.validation,
+          });
+        } catch {
+          sendUpdate("complete", "completed");
+        }
+      // Track model for analytics
+      results.finalModel = results.selectedModel;
+      results.retryCount = 0;
+
+      } catch (error: any) {
+        phaseTimings.generationMs = Date.now() - genStart;
+        if (error.name === "AbortError") {
+          // Cancelled by user
+          sendUpdate("cancelled", "completed");
+        } else {
+          console.error(`Deep research failed: ${error.message}`);
+          sendUpdate("generating", "error", undefined, `Deep research failed: ${error.message}`);
+          sendUpdate("complete", "error", undefined, error.message);
+        }
+        hasError = true;
+      }
+    } else {
+    // ---- Standard streaming generation with retry loop ----
+
     // If generation fails (provider down, rate limit, auth error), reroute to
     // an alternative provider. If validation detects a poor response, retry
     // with a more capable model.
 
     const MAX_RETRIES = 2;
-    let aiResponse = "";
-    let currentModel: ModelOption = results.selectedModel;
     let currentParameters = { ...results.parameters };
-    let retryCount = 0;
     const failedProviders = new Set<Provider>();
-    const providerFailures: ProviderFailure[] = [];
-    const retryAttempts: RetryAttempt[] = [];
-
-    /** Accumulate generation-only and validation-only durations across retries */
-    let totalGenerationMs = 0;
-    let totalValidationMs = 0;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       // --- Phase 5: Generate ---
@@ -698,6 +759,8 @@ export async function runAnalysisJob(
     // Track which model actually generated the final response
     results.finalModel = currentModel;
     results.retryCount = retryCount;
+
+    } // end standard generation else block
 
     // Save assistant response to DB if authenticated
     if (!hasError && aiResponse && job.userId && job.conversationId) {
