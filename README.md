@@ -28,7 +28,7 @@ An open-source universal AI interface with intelligent middleware that optimizes
 
 **Progress Tracking** - Per-user prompt quality sparkline, trend indicators, lesson completion, and model usage stats visible in header and settings.
 
-**Deep Research Detection** - LLM-based classifier determines whether a prompt warrants extended multi-source research (with heuristic fallback), replacing keyword-only detection.
+**Deep Research Mode** - LLM-based classifier determines whether a prompt warrants extended multi-source research. When triggered, users see a confirmation modal and can proceed with Gemini Deep Research (Google's `deep-research-pro-preview` agent via the Interactions API) for comprehensive multi-source web-grounded analysis, or decline to use a faster standard model.
 
 **Demo Mode** - Public-facing demo with server-provided API keys, three-tier abuse protection (per-session, per-IP, and daily budget rate limiting), and automatic key injection. Demo keys manageable via admin console with encrypted file persistence. Users with their own keys bypass all demo limits. Conversation history sidebar and full REST API available in demo mode via shared demo-system identity.
 
