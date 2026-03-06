@@ -24,7 +24,7 @@ export default function DeepResearchModal({
 }: DeepResearchModalProps) {
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onUseFasterAlternative(); }}>
-      <DialogContent className="sm:max-w-md" data-testid="modal-deep-research">
+      <DialogContent className="sm:max-w-lg" data-testid="modal-deep-research">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Clock className="h-5 w-5 text-chart-4" />
@@ -47,7 +47,7 @@ export default function DeepResearchModal({
             </p>
           </div>
         </div>
-        <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
+        <DialogFooter className="flex-col sm:flex-row sm:justify-end gap-2 pt-4">
           <Button
             data-testid="button-faster-alternative"
             variant="outline"
