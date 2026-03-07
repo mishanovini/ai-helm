@@ -315,24 +315,23 @@ const DEEP_RESEARCH_MODEL = "deep-research-pro-preview-12-2025";
 const DEEP_RESEARCH_POLL_INTERVAL = 5_000;
 
 /**
- * If the interaction's `updated` timestamp hasn't changed for this long,
- * we assume the backend is stuck and bail out. This does NOT limit total
- * research time — only catches truly stale/hung interactions.
+ * Safety-net ceiling to prevent runaway polling if the API silently stalls.
+ * The Gemini Interactions API provides NO liveness signal — `updated` stays
+ * frozen at the creation timestamp throughout, and no intermediate fields
+ * appear. The only signals are the terminal statuses: "completed" / "failed".
+ * So we use a generous wall-clock limit to catch true runaways (like the
+ * 2-hour poll observed in production) while still allowing long research.
+ * Users can always cancel earlier via the stop button (AbortSignal).
  */
-const DEEP_RESEARCH_STALE_MS = 3 * 60 * 1000; // 3 minutes with no progress
+const DEEP_RESEARCH_MAX_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
  * Generate a response using Gemini's Deep Research API.
  *
- * This is a long-running operation (potentially 5–10+ minutes): the model
- * performs multi-source web research in the background. We poll for completion
- * every few seconds and call `onStatus` with human-readable progress strings
- * intended for the process log — NOT the chat response area.
- *
- * There is no wall-clock timeout; the user can cancel via the stop button
- * (AbortSignal) at any time. Instead, we track the `updated` timestamp from
- * the API — if it hasn't changed in {@link DEEP_RESEARCH_STALE_MS} we treat
- * the interaction as stuck.
+ * This is a long-running operation (typically 1–3 minutes, occasionally 10+):
+ * the model performs multi-source web research in the background. We poll for
+ * completion every few seconds and call `onStatus` with human-readable progress
+ * strings intended for the process log — NOT the chat response area.
  *
  * @param prompt - The optimized research prompt
  * @param apiKey - Gemini API key
@@ -362,15 +361,21 @@ export async function generateDeepResearchResponse(
 
   onStatus("Deep research started — analyzing multiple sources");
 
-  // Poll for completion — no wall-clock timeout, but detect stale interactions
+  const deadline = Date.now() + DEEP_RESEARCH_MAX_MS;
   let pollCount = 0;
-  let lastUpdated: string | undefined = (interaction as any).updated;
-  let lastUpdatedAt = Date.now();
 
   while (true) {
     if (signal?.aborted) {
       try { await ai.interactions.cancel(interactionId); } catch { /* ignore */ }
       throw new DOMException("Aborted", "AbortError");
+    }
+
+    if (Date.now() > deadline) {
+      try { await ai.interactions.cancel(interactionId); } catch { /* ignore */ }
+      throw new Error(
+        `Deep research did not complete within ${DEEP_RESEARCH_MAX_MS / 60_000} minutes. ` +
+        "Try a more focused query, or try again later."
+      );
     }
 
     await new Promise(resolve => setTimeout(resolve, DEEP_RESEARCH_POLL_INTERVAL));
@@ -396,22 +401,6 @@ export async function generateDeepResearchResponse(
     if (result.status === "failed") {
       const errorMsg = (result as any).error || "Unknown deep research error";
       throw new Error(`Deep research failed: ${errorMsg}`);
-    }
-
-    // Track whether the interaction is making progress via its `updated` field
-    const currentUpdated = (result as any).updated;
-    if (currentUpdated && currentUpdated !== lastUpdated) {
-      lastUpdated = currentUpdated;
-      lastUpdatedAt = Date.now();
-    }
-
-    // If the interaction hasn't been updated in STALE_MS, assume it's stuck
-    if (Date.now() - lastUpdatedAt > DEEP_RESEARCH_STALE_MS) {
-      try { await ai.interactions.cancel(interactionId); } catch { /* ignore */ }
-      throw new Error(
-        "Deep research appears stuck — no progress from the API in " +
-        `${DEEP_RESEARCH_STALE_MS / 1000}s. Try again or narrow your query.`
-      );
     }
 
     // Still running — send periodic status updates to the process log
