@@ -413,17 +413,13 @@ async function runFallbackAnalysis(
     finalSecurityExplanation = blockReason.userMessage;
   }
 
-  // Basic prompt quality estimation (arithmetic only, not classification)
-  const words = message.split(/\s+/).length;
-  const hasQuestion = /\?/.test(message);
-  const clarity = Math.min(100, Math.max(20, words > 3 ? 50 + words : 20));
-  const specificity = words > 10 ? 55 : 30;
-  const actionability = hasQuestion ? 65 : words > 5 ? 50 : 25;
-  const score = Math.round((clarity + specificity + actionability) / 3);
-
-  const suggestions: string[] = [];
-  if (words < 5) suggestions.push("Add more detail to your request");
-  if (words >= 5) suggestions.push("Consider adding context or constraints");
+  // Prompt quality unavailable — consolidated LLM analysis failed and
+  // arithmetic heuristics aren't representative, so report as unavailable.
+  const score = -1;
+  const clarity = -1;
+  const specificity = -1;
+  const actionability = -1;
+  const suggestions = ["Prompt quality analysis was unavailable for this request."];
 
   // Generate a short title from the first few words
   const conversationTitle = (() => {

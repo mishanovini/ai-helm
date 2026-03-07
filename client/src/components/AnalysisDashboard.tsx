@@ -366,6 +366,11 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 <Lightbulb className="h-3 w-3" />
                 Prompt Quality
               </label>
+              {data.promptQuality.score < 0 ? (
+                <p className="text-xs text-muted-foreground" data-testid="text-prompt-quality-score">
+                  Prompt quality analysis was unavailable for this request.
+                </p>
+              ) : (
               <div className="space-y-2.5">
                 <div className="flex items-baseline gap-2">
                   <span className={cn("text-lg font-bold", getQualityColor(data.promptQuality.score))} data-testid="text-prompt-quality-score">
@@ -409,6 +414,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                   </div>
                 )}
               </div>
+              )}
             </Card>
           ) : (
             <Card className="p-3">
