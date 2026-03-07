@@ -362,7 +362,9 @@ export async function generateDeepResearchResponse(
   onStatus("Deep research started — analyzing multiple sources");
 
   const deadline = Date.now() + DEEP_RESEARCH_MAX_MS;
+  const MAX_CONSECUTIVE_ERRORS = 5;
   let pollCount = 0;
+  let consecutiveErrors = 0;
 
   while (true) {
     if (signal?.aborted) {
@@ -381,7 +383,25 @@ export async function generateDeepResearchResponse(
     await new Promise(resolve => setTimeout(resolve, DEEP_RESEARCH_POLL_INTERVAL));
     pollCount++;
 
-    const result = await ai.interactions.get(interactionId);
+    let result;
+    try {
+      result = await ai.interactions.get(interactionId);
+    } catch (pollError: any) {
+      // Network error, 500, rate limit, etc. — don't silently loop forever.
+      // Allow a few transient failures before giving up.
+      consecutiveErrors++;
+      console.warn(
+        `Deep research poll error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`,
+        pollError.message,
+      );
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+        throw new Error(
+          `Deep research polling failed ${MAX_CONSECUTIVE_ERRORS} times in a row: ${pollError.message}`
+        );
+      }
+      continue; // retry on next poll
+    }
+    consecutiveErrors = 0; // reset on successful poll
 
     if (result.status === "completed") {
       // Extract final text from outputs (Content_2 is a union; cast to access .text)
@@ -398,9 +418,15 @@ export async function generateDeepResearchResponse(
       return finalText;
     }
 
-    if (result.status === "failed") {
-      const errorMsg = (result as any).error || "Unknown deep research error";
-      throw new Error(`Deep research failed: ${errorMsg}`);
+    if (result.status === "failed" || result.status === "cancelled") {
+      const errorMsg = (result as any).error || `Deep research ${result.status}`;
+      throw new Error(`Deep research ${result.status}: ${errorMsg}`);
+    }
+
+    if (result.status !== "in_progress") {
+      // Unknown status — log it and treat as terminal to avoid infinite loops
+      console.error(`Deep research returned unexpected status: "${result.status}"`);
+      throw new Error(`Deep research returned unexpected status: "${result.status}"`);
     }
 
     // Still running — send periodic status updates to the process log
