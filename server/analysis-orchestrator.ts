@@ -207,10 +207,19 @@ export async function runAnalysisJob(
     sendUpdate("style", "completed", { style: analysis.style });
 
     results.securityScore = analysis.securityScore;
-    results.securityExplanation = analysis.securityExplanation;
+    // When DLP has already redacted sensitive data, override the LLM's explanation
+    // which often incorrectly claims the request was "blocked". The request was NOT
+    // blocked — the sensitive data was masked and the prompt was processed normally.
+    if (dlpResult.hasSensitiveData) {
+      results.securityExplanation =
+        `Sensitive data detected (${dlpResult.summary}) and automatically redacted before processing. ` +
+        "Your prompt was still answered — no sensitive data was sent to any AI provider.";
+    } else {
+      results.securityExplanation = analysis.securityExplanation;
+    }
     sendUpdate("security", "completed", {
       securityScore: analysis.securityScore,
-      securityExplanation: analysis.securityExplanation
+      securityExplanation: results.securityExplanation,
     });
 
     // Send prompt quality data
