@@ -23,8 +23,8 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import CompassRose from "@/components/icons/CompassRose";
 import {
-  Brain,
   Shield,
   ShieldAlert,
   ShieldBan,
@@ -262,7 +262,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
   return (
     <div className="space-y-3">
       <h2 className="text-sm font-semibold flex items-center gap-1.5 mb-1">
-        <Brain className="h-4 w-4 text-primary" />
+        <CompassRose size={16} className="text-primary" />
         Analysis
       </h2>
 

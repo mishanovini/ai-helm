@@ -1,4 +1,5 @@
-import { Brain, Settings, LogOut, User, Network, LayoutDashboard, GraduationCap } from "lucide-react";
+import { Settings, LogOut, User, Network, LayoutDashboard, GraduationCap } from "lucide-react";
+import CompassRose from "@/components/icons/CompassRose";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +23,7 @@ export default function Header() {
   return (
     <header className="h-14 border-b bg-card/50 backdrop-blur flex items-center justify-between px-6 sticky top-0 z-10">
       <div className="flex items-center gap-2">
-        <Brain className="h-6 w-6 text-primary" />
+        <CompassRose size={24} className="text-primary" />
         <Link href="/">
           <h1 className="text-lg font-semibold cursor-pointer hover:text-primary transition-colors" data-testid="text-app-title">
             AI Helm

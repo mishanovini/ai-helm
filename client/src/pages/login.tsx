@@ -1,4 +1,4 @@
-import { Brain } from "lucide-react";
+import CompassRose from "@/components/icons/CompassRose";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
@@ -21,7 +21,7 @@ export default function Login() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <Brain className="h-12 w-12 text-primary" />
+            <CompassRose size={48} className="text-primary" />
           </div>
           <CardTitle className="text-2xl">AI Helm</CardTitle>
           <CardDescription>

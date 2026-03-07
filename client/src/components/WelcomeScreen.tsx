@@ -9,7 +9,8 @@
  * Clicking a prompt suggestion fills the chat input (does not auto-send).
  */
 
-import { Brain, BookOpen } from "lucide-react";
+import { BookOpen } from "lucide-react";
+import CompassRose from "@/components/icons/CompassRose";
 import { Button } from "@/components/ui/button";
 import PromptSuggestionCard from "@/components/PromptSuggestionCard";
 import { getSuggestedPrompts, type UserProgressSummary } from "@/lib/suggested-prompts";
@@ -30,7 +31,7 @@ export default function WelcomeScreen({ onSelectPrompt, userProgress, onOpenLibr
   return (
     <div className="flex flex-col items-center justify-center h-full max-w-2xl mx-auto px-6">
       {/* Logo + Greeting */}
-      <Brain className="h-12 w-12 text-primary mb-4" />
+      <CompassRose size={48} className="text-primary mb-4" />
       <h2 className="text-2xl font-semibold mb-2">Welcome to AI Helm</h2>
       <p className="text-muted-foreground text-center mb-8 max-w-md">
         Your universal AI interface — we analyze every prompt and route it
