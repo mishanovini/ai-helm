@@ -199,7 +199,8 @@ export default function Home() {
         addLog("Using standard model instead of deep research", "info");
       }
     } else if (phase === "deep_research_progress" && status === "processing") {
-      // Status updates from the long-running deep research poll — show in process log only
+      // Replace previous progress line so they don't stack up
+      setLogs(prev => prev.filter(log => !log.message.startsWith("Researching...")));
       addLog(payload.message, "processing");
     } else if (phase === "promptQuality" && status === "completed") {
       addLog(`Prompt quality: ${payload.promptQuality.score}/100`, "success");
@@ -255,7 +256,11 @@ export default function Home() {
       addLog("Parameters configured", "success");
       setAnalysisData(prev => ({ ...prev, parameters: payload.parameters } as AnalysisData));
     } else if (phase === "generating" && status === "processing") {
-      addLog("Prompting AI model...", "processing");
+      if (payload?.deepResearch) {
+        addLog("Deep research in progress — this may take several minutes. Feel free to check back shortly.", "processing");
+      } else {
+        addLog("Prompting AI model...", "processing");
+      }
       setIsGenerating(true);
       streamingMessageRef.current = "";
       // Add a placeholder assistant message for streaming, or reuse an
