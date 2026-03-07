@@ -314,23 +314,27 @@ const DEEP_RESEARCH_MODEL = "deep-research-pro-preview-12-2025";
 /** Polling interval in ms when waiting for deep research to complete */
 const DEEP_RESEARCH_POLL_INTERVAL = 5_000;
 
+/** Hard ceiling so a stuck interaction doesn't poll forever */
+const DEEP_RESEARCH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Generate a response using Gemini's Deep Research API.
  *
  * Unlike standard generation, deep research is a long-running background task
  * that uses multi-source web grounding. The function polls for completion and
- * sends progress updates via the `onProgress` callback.
+ * calls `onStatus` with short human-readable progress strings intended for the
+ * process log — NOT the chat response area.
  *
  * @param prompt - The optimized research prompt
  * @param apiKey - Gemini API key
- * @param onProgress - Called periodically with progress text (shown as streaming tokens to the user)
+ * @param onStatus - Called periodically with a status string for the process log
  * @param signal - Optional AbortSignal for cancellation
  * @returns The final research response text
  */
 export async function generateDeepResearchResponse(
   prompt: string,
   apiKey: string,
-  onProgress: (message: string) => void,
+  onStatus: (message: string) => void,
   signal?: AbortSignal,
 ): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
@@ -347,15 +351,23 @@ export async function generateDeepResearchResponse(
     throw new Error("Deep research failed to start: no interaction ID returned");
   }
 
-  onProgress("\n🔬 *Deep research started — analyzing multiple sources...*\n\n");
+  onStatus("Deep research started — analyzing multiple sources");
 
-  // Poll for completion
+  // Poll for completion with a hard timeout
+  const deadline = Date.now() + DEEP_RESEARCH_TIMEOUT_MS;
   let pollCount = 0;
   while (true) {
     if (signal?.aborted) {
-      // Best-effort cancellation
       try { await ai.interactions.cancel(interactionId); } catch { /* ignore */ }
       throw new DOMException("Aborted", "AbortError");
+    }
+
+    if (Date.now() > deadline) {
+      try { await ai.interactions.cancel(interactionId); } catch { /* ignore */ }
+      throw new Error(
+        `Deep research timed out after ${DEEP_RESEARCH_TIMEOUT_MS / 1000}s. ` +
+        "The query may be too broad — try narrowing it."
+      );
     }
 
     await new Promise(resolve => setTimeout(resolve, DEEP_RESEARCH_POLL_INTERVAL));
@@ -383,10 +395,10 @@ export async function generateDeepResearchResponse(
       throw new Error(`Deep research failed: ${errorMsg}`);
     }
 
-    // Still running — send periodic progress updates
+    // Still running — send periodic status updates to the process log
     if (pollCount % 3 === 0) {
       const elapsed = Math.round((pollCount * DEEP_RESEARCH_POLL_INTERVAL) / 1000);
-      onProgress(`*Researching... (${elapsed}s elapsed)*\n`);
+      onStatus(`Researching... (${elapsed}s elapsed)`);
     }
   }
 }

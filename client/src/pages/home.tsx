@@ -198,6 +198,9 @@ export default function Home() {
       } else {
         addLog("Using standard model instead of deep research", "info");
       }
+    } else if (phase === "deep_research_progress" && status === "processing") {
+      // Status updates from the long-running deep research poll — show in process log only
+      addLog(payload.message, "processing");
     } else if (phase === "promptQuality" && status === "completed") {
       addLog(`Prompt quality: ${payload.promptQuality.score}/100`, "success");
       setAnalysisData(prev => ({

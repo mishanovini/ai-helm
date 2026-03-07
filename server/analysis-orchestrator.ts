@@ -503,7 +503,7 @@ export async function runAnalysisJob(
         aiResponse = await generateDeepResearchResponse(
           results.optimizedPrompt,
           apiKeys.gemini,
-          (progress) => sendUpdate("response_chunk", "processing", { token: progress }),
+          (status) => sendUpdate("deep_research_progress", "processing", { message: status }),
           job.signal,
         );
         phaseTimings.generationMs = Date.now() - genStart;
