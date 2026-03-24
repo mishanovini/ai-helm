@@ -388,6 +388,7 @@ export async function runAnalysisJob(
           requiresMultimodal: analysis.requiresMultimodal,
           isSubstantiveCreative: analysis.isSubstantiveCreative,
           useDeepResearch: analysis.useDeepResearch,
+          requiresWebSearch: analysis.requiresWebSearch,
         });
         results.selectedModel = selection.primary;
         results.modelReasoning = selection.reasoning;
@@ -398,6 +399,11 @@ export async function runAnalysisJob(
       const costEstimate = estimateCost(results.selectedModel, estimatedInputTokens, 500);
       results.estimatedCost = costEstimate;
 
+      // Notify the client when web search is active so the UI can surface an indicator
+      if (analysis.requiresWebSearch) {
+        sendUpdate("web_search", "processing", { active: true });
+      }
+
       sendUpdate("model", "completed", {
         selectedModel: results.selectedModel.model,
         modelDisplayName: results.selectedModel.displayName,
@@ -406,6 +412,7 @@ export async function runAnalysisJob(
         fallbackModel: results.fallbackModel?.displayName || null,
         estimatedCost: costEstimate.displayText,
         routerRuleMatched: results.routerRuleMatched || null,
+        webSearch: analysis.requiresWebSearch,
         costBreakdown: {
           input: estimatedInputTokens,
           output: 500,
@@ -585,7 +592,8 @@ export async function runAnalysisJob(
             sendUpdate("response_chunk", "processing", { token });
           },
           job.signal,
-          resolvedSystemPrompt
+          resolvedSystemPrompt,
+          analysis.requiresWebSearch
         );
         totalGenerationMs += Date.now() - genStart;
 
@@ -806,6 +814,7 @@ export async function runAnalysisJob(
           optimizedPrompt: results.optimizedPrompt,
           parameters: results.parameters,
           promptQuality: analysis.promptQuality,
+          webSearch: analysis.requiresWebSearch,
         });
       } catch {
         // Non-critical

@@ -16,6 +16,7 @@
 import {
   getModelFamilies,
   resolveAlias,
+  getWebSearchCapableModelIds,
   type ModelPricing,
   type CostTier,
   type SpeedTier,
@@ -134,6 +135,8 @@ export interface LLMAnalysisOverride {
   isSubstantiveCreative: boolean;
   /** Does this warrant deep, multi-source research? */
   useDeepResearch: boolean;
+  /** Does this query need current/real-time information from the internet? */
+  requiresWebSearch: boolean;
 }
 
 /**
@@ -169,12 +172,27 @@ export function selectOptimalModel(
   const deepResearchActive = !!(llmAnalysis?.useDeepResearch || useDeepResearch);
   const needsPremiumModel = requiresDeepReasoning || isSubstantiveCreative;
 
+  const requiresWebSearch = llmAnalysis?.requiresWebSearch ?? false;
+
   const catalog = buildCatalog();
   const pricing = buildPricing();
-  const availableModels = catalog.filter((m) => availableProviders[m.provider]);
+  let availableModels = catalog.filter((m) => availableProviders[m.provider]);
 
   if (availableModels.length === 0) {
     throw new Error("No API providers available. Please configure at least one API key in Settings.");
+  }
+
+  // When web search is required, restrict to models with native search capability.
+  // Non-capable models (e.g., all Anthropic models) are excluded entirely — the
+  // router is the authority and will not allow a model that cannot fulfill the query.
+  if (requiresWebSearch) {
+    const webSearchCapable = getWebSearchCapableModelIds();
+    const searchModels = availableModels.filter((m) => webSearchCapable.has(m.model));
+    if (searchModels.length > 0) {
+      availableModels = searchModels;
+    }
+    // If no search-capable models are available, fall through with all models
+    // so the user still gets a response (degraded, but not a hard error).
   }
 
   // STEP 1: Check if context size requires specific models

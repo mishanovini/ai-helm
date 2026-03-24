@@ -36,6 +36,7 @@ import {
   Tags,
   BookOpen,
   ExternalLink,
+  Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -70,6 +71,8 @@ export interface AnalysisData {
   optimizedPrompt: string;
   parameters: Record<string, number | string>;
   promptQuality?: PromptQualityData;
+  /** True when the selected model is performing a live web search to answer this query */
+  webSearch?: boolean;
 }
 
 interface AnalysisDashboardProps {
@@ -337,6 +340,16 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                     {data.estimatedCost && (
                       <Badge variant="outline" className="text-xs" data-testid="badge-cost">
                         {data.estimatedCost}
+                      </Badge>
+                    )}
+                    {data.webSearch && (
+                      <Badge
+                        variant="outline"
+                        className="text-xs gap-1 border-blue-400/40 bg-blue-500/10 text-blue-400"
+                        data-testid="badge-web-search"
+                      >
+                        <Globe className="h-2.5 w-2.5" />
+                        Web search
                       </Badge>
                     )}
                   </div>

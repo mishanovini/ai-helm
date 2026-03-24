@@ -44,6 +44,13 @@ export interface ModelFamily {
   pricing: ModelPricing;
   /** Context window in tokens */
   contextWindow: number;
+  /**
+   * Whether this model supports native web search grounding.
+   * - Gemini: googleSearch grounding tool
+   * - OpenAI: web_search_preview tool
+   * - Anthropic: no native search API support (false)
+   */
+  webSearchCapable: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +58,7 @@ export interface ModelFamily {
 // ---------------------------------------------------------------------------
 
 const MODEL_FAMILIES: ModelFamily[] = [
-  // Gemini
+  // Gemini — googleSearch grounding supported
   {
     alias: "gemini-flash-lite",
     provider: "gemini",
@@ -63,6 +70,7 @@ const MODEL_FAMILIES: ModelFamily[] = [
     idPattern: /^gemini-[\d.]+-flash-lite/,
     defaultModelId: "gemini-2.5-flash-lite",
     pricing: { input: 0.10, output: 0.40 },
+    webSearchCapable: true,
   },
   {
     alias: "gemini-flash",
@@ -75,6 +83,7 @@ const MODEL_FAMILIES: ModelFamily[] = [
     idPattern: /^gemini-[\d.]+-flash(?:-preview)?$/,
     defaultModelId: "gemini-3-flash-preview",
     pricing: { input: 0.50, output: 3.00 },
+    webSearchCapable: true,
   },
   {
     alias: "gemini-pro",
@@ -87,9 +96,10 @@ const MODEL_FAMILIES: ModelFamily[] = [
     idPattern: /^gemini-[\d.]+-pro/,
     defaultModelId: "gemini-3.1-pro-preview",
     pricing: { input: 2.00, output: 12.00 },
+    webSearchCapable: true,
   },
 
-  // OpenAI
+  // OpenAI — web_search_preview tool supported
   {
     alias: "gpt-nano",
     provider: "openai",
@@ -101,6 +111,7 @@ const MODEL_FAMILIES: ModelFamily[] = [
     idPattern: /^gpt-[\d.]+-nano/,
     defaultModelId: "gpt-5-nano",
     pricing: { input: 0.05, output: 0.40 },
+    webSearchCapable: true,
   },
   {
     alias: "gpt-mini",
@@ -113,6 +124,7 @@ const MODEL_FAMILIES: ModelFamily[] = [
     idPattern: /^gpt-[\d.]+-mini/,
     defaultModelId: "gpt-5-mini",
     pricing: { input: 0.25, output: 2.00 },
+    webSearchCapable: true,
   },
   {
     alias: "gpt",
@@ -125,9 +137,10 @@ const MODEL_FAMILIES: ModelFamily[] = [
     idPattern: /^gpt-[\d.]+$/,
     defaultModelId: "gpt-5.2",
     pricing: { input: 1.75, output: 14.00 },
+    webSearchCapable: true,
   },
 
-  // Anthropic
+  // Anthropic — no native web search API support
   {
     alias: "claude-haiku",
     provider: "anthropic",
@@ -139,6 +152,7 @@ const MODEL_FAMILIES: ModelFamily[] = [
     idPattern: /^claude-haiku/,
     defaultModelId: "claude-haiku-4-5",
     pricing: { input: 1.00, output: 5.00 },
+    webSearchCapable: false,
   },
   {
     alias: "claude-sonnet",
@@ -151,6 +165,7 @@ const MODEL_FAMILIES: ModelFamily[] = [
     idPattern: /^claude-sonnet/,
     defaultModelId: "claude-sonnet-4-6",
     pricing: { input: 3.00, output: 15.00 },
+    webSearchCapable: false,
   },
   {
     alias: "claude-opus",
@@ -163,6 +178,7 @@ const MODEL_FAMILIES: ModelFamily[] = [
     idPattern: /^claude-opus/,
     defaultModelId: "claude-opus-4-6",
     pricing: { input: 5.00, output: 25.00 },
+    webSearchCapable: false,
   },
 ];
 
@@ -231,6 +247,20 @@ export function updateResolvedModel(alias: string, modelId: string): void {
   if (family) {
     resolvedModels.set(alias, modelId);
   }
+}
+
+/**
+ * Returns the set of resolved model IDs that support native web search.
+ * Used by model-selection.ts to filter the candidate list when web search is required.
+ */
+export function getWebSearchCapableModelIds(): Set<string> {
+  const ids = new Set<string>();
+  for (const family of MODEL_FAMILIES) {
+    if (family.webSearchCapable) {
+      ids.add(resolvedModels.get(family.alias) ?? family.defaultModelId);
+    }
+  }
+  return ids;
 }
 
 /** Reset all aliases to their defaults (for testing). */

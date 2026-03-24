@@ -77,6 +77,8 @@ export interface ConsolidatedAnalysisResult {
   isSubstantiveCreative: boolean;
   /** Does this warrant deep, multi-source research taking several minutes? */
   useDeepResearch: boolean;
+  /** Does this query require current/real-time information from the internet? */
+  requiresWebSearch: boolean;
   /** How relevant is conversation history to interpreting this latest message? */
   contextRelevance: "none" | "low" | "high";
 }
@@ -94,6 +96,8 @@ export interface RouterRule {
     promptLengthMin?: number;
     promptLengthMax?: number;
     customRegex?: string;
+    /** When true, rule only matches queries that require web search */
+    requiresWebSearch?: boolean;
   };
   modelPriority: string[];
   reasoning: string;

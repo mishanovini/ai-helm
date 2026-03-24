@@ -19,6 +19,9 @@ import type { Provider, ParameterTuning, APIKeys, ConversationMessage } from '..
  *   - OpenAI: `{ role: 'system' }` message at start
  *   - Anthropic: `system:` parameter in messages.create()
  *   - Gemini: `systemInstruction` in config
+ * @param webSearch - When true, activates native web search for providers that support it.
+ *   Gemini: googleSearch grounding tool. OpenAI: web_search_preview tool.
+ *   Anthropic does not support native web search and ignores this flag.
  */
 export async function generateResponse(
   optimizedPrompt: string,
@@ -27,13 +30,14 @@ export async function generateResponse(
   model: string,
   parameters: ParameterTuning,
   apiKeys: APIKeys,
-  systemPrompt?: string
+  systemPrompt?: string,
+  webSearch?: boolean
 ): Promise<string> {
   switch (provider) {
     case 'gemini':
-      return generateGeminiResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.gemini!, systemPrompt);
+      return generateGeminiResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.gemini!, systemPrompt, webSearch);
     case 'openai':
-      return generateOpenAIResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.openai!, systemPrompt);
+      return generateOpenAIResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.openai!, systemPrompt, webSearch);
     case 'anthropic':
       return generateAnthropicResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.anthropic!, systemPrompt);
     default:
@@ -47,6 +51,9 @@ export async function generateResponse(
  * Supports cancellation via AbortController signal.
  *
  * @param systemPrompt - Optional system-level instruction injected per-provider
+ * @param webSearch - When true, activates native web search for providers that support it.
+ *   Gemini: googleSearch grounding tool. OpenAI: web_search_preview tool.
+ *   Anthropic does not support native web search and ignores this flag.
  */
 export async function generateResponseStream(
   optimizedPrompt: string,
@@ -57,13 +64,14 @@ export async function generateResponseStream(
   apiKeys: APIKeys,
   onToken: (token: string) => void,
   signal?: AbortSignal,
-  systemPrompt?: string
+  systemPrompt?: string,
+  webSearch?: boolean
 ): Promise<string> {
   switch (provider) {
     case 'gemini':
-      return streamGeminiResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.gemini!, onToken, signal, systemPrompt);
+      return streamGeminiResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.gemini!, onToken, signal, systemPrompt, webSearch);
     case 'openai':
-      return streamOpenAIResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.openai!, onToken, signal, systemPrompt);
+      return streamOpenAIResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.openai!, onToken, signal, systemPrompt, webSearch);
     case 'anthropic':
       return streamAnthropicResponse(optimizedPrompt, conversationHistory, model, parameters, apiKeys.anthropic!, onToken, signal, systemPrompt);
     default:
@@ -81,7 +89,8 @@ async function generateGeminiResponse(
   model: string,
   parameters: ParameterTuning,
   apiKey: string,
-  systemPrompt?: string
+  systemPrompt?: string,
+  webSearch?: boolean
 ): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
 
@@ -102,6 +111,7 @@ async function generateGeminiResponse(
       topP: parameters.top_p,
       maxOutputTokens: parameters.max_tokens,
       ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
+      ...(webSearch ? { tools: [{ googleSearch: {} }] } : {}),
     }
   });
 
@@ -118,7 +128,8 @@ async function generateOpenAIResponse(
   model: string,
   parameters: ParameterTuning,
   apiKey: string,
-  systemPrompt?: string
+  systemPrompt?: string,
+  webSearch?: boolean
 ): Promise<string> {
   const openai = new OpenAI({ apiKey });
 
@@ -133,7 +144,9 @@ async function generateOpenAIResponse(
     messages,
     temperature: parameters.temperature,
     top_p: parameters.top_p,
-    max_tokens: parameters.max_tokens
+    max_tokens: parameters.max_tokens,
+    // eslint-disable-next-line -- web_search_preview is a valid OpenAI tool type not yet in the installed SDK typedefs
+    ...(webSearch ? { tools: [{ type: "web_search_preview" }] as any } : {}),
   });
 
   return response.choices[0]?.message?.content || "I apologize, but I couldn't generate a response at this time.";
@@ -180,7 +193,8 @@ async function streamGeminiResponse(
   apiKey: string,
   onToken: (token: string) => void,
   signal?: AbortSignal,
-  systemPrompt?: string
+  systemPrompt?: string,
+  webSearch?: boolean
 ): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
 
@@ -201,6 +215,7 @@ async function streamGeminiResponse(
       topP: parameters.top_p,
       maxOutputTokens: parameters.max_tokens,
       ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
+      ...(webSearch ? { tools: [{ googleSearch: {} }] } : {}),
     },
   });
 
@@ -225,7 +240,8 @@ async function streamOpenAIResponse(
   apiKey: string,
   onToken: (token: string) => void,
   signal?: AbortSignal,
-  systemPrompt?: string
+  systemPrompt?: string,
+  webSearch?: boolean
 ): Promise<string> {
   const openai = new OpenAI({ apiKey });
 
@@ -242,6 +258,8 @@ async function streamOpenAIResponse(
     top_p: parameters.top_p,
     max_tokens: parameters.max_tokens,
     stream: true,
+    // eslint-disable-next-line -- web_search_preview is a valid OpenAI tool type not yet in the installed SDK typedefs
+    ...(webSearch ? { tools: [{ type: "web_search_preview" }] as any } : {}),
   });
 
   let fullText = "";

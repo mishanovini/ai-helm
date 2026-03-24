@@ -52,6 +52,7 @@ const consolidatedSchema = z.object({
   requiresMultimodal: z.boolean().default(false),
   isSubstantiveCreative: z.boolean().default(false),
   useDeepResearch: z.boolean().default(false),
+  requiresWebSearch: z.boolean().default(false),
   contextRelevance: z.enum(["none", "low", "high"]).catch("low"),
 });
 
@@ -227,6 +228,7 @@ For benign prompts, simply describe what the user wants. For deceptive or malici
   "requiresMultimodal": true/false — does this explicitly require image/video/audio processing?,
   "isSubstantiveCreative": true/false — is this a substantive creative writing task (story, article, email, speech, poem, report, essay)? False for trivial creative requests like "tell me a joke" or "give me a fun fact",
   "useDeepResearch": true/false — does this warrant deep, multi-source research taking several minutes? Only true for comprehensive analysis, literature reviews, multi-angle investigations, or requests that explicitly ask for thorough/exhaustive research,
+  "requiresWebSearch": true/false — does this query need current or real-time information from the internet to answer accurately? True for: current news, live prices, today's weather, recent events, "latest" versions, real-time data, or anything where a static training cutoff would produce a stale answer. False for: timeless knowledge, conceptual explanations, coding help, math, creative writing, or anything answerable from training data alone,
   "contextRelevance": "none" | "low" | "high" — how relevant is the conversation history to understanding this latest message? "none" = message is completely standalone, "low" = history provides minor background but message is understandable alone, "high" = message is a direct follow-up that only makes sense with prior context (e.g. "do that again" or a one-word answer to a prior question)
 }
 
@@ -457,6 +459,7 @@ async function runFallbackAnalysis(
     requiresMultimodal: false,
     isSubstantiveCreative: false,
     useDeepResearch: false,
+    requiresWebSearch: false,
     contextRelevance: "low" as const,
   };
 }

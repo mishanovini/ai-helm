@@ -117,6 +117,11 @@ function matchesRule(rule: RouterRule, ctx: RouterEvalContext): boolean {
     if (message.length > conditions.promptLengthMax) return false;
   }
 
+  // Web search requirement
+  if (conditions.requiresWebSearch != null) {
+    if (analysis.requiresWebSearch !== conditions.requiresWebSearch) return false;
+  }
+
   // Custom regex
   if (conditions.customRegex) {
     try {
@@ -393,6 +398,7 @@ const nlEditResultSchema = z.object({
       promptLengthMin: z.number().optional(),
       promptLengthMax: z.number().optional(),
       customRegex: z.string().optional(),
+      requiresWebSearch: z.boolean().optional(),
     }),
     modelPriority: z.array(z.string()),
     reasoning: z.string(),
@@ -657,6 +663,7 @@ const nlRuleResultSchema = z.object({
       promptLengthMin: z.number().optional(),
       promptLengthMax: z.number().optional(),
       customRegex: z.string().optional(),
+      requiresWebSearch: z.boolean().optional(),
     }),
     modelPriority: z.array(z.string()),
     reasoning: z.string(),
