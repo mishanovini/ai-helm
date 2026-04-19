@@ -1,7 +1,7 @@
 name: Kanban Build Engine
 on:
-  # schedule:
-  #   - cron: '*/15 * * * *'  # Disabled until Claude Code GitHub App is installed
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 env:
   PROJECT_ID: PVT_kwHOBA7RLM4BVBrN
