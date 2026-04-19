@@ -1,0 +1,13 @@
+name: Auto-add support tickets to board
+on:
+  issues:
+    types: [opened, labeled]
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'support-ticket')
+    steps:
+      - uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: https://github.com/users/mishanovini/projects/2
+          github-token: ${{ secrets.PROJECT_TOKEN }}
