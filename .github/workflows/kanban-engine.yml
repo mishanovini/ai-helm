@@ -22,6 +22,10 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+      - name: Configure git identity
+        run: |
+          git config user.name "Build Queue"
+          git config user.email "build-queue@noreply.github.com"
       - name: Read board
         id: board
         env:
@@ -43,8 +47,19 @@ jobs:
             gh issue comment $ISSUE_NUM --repo mishanovini/ai-helm --body '## Moving to Next. _Automated_'
             gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBA7RLM4BVBrN" itemId: "'$ITEM_ID'" fieldId: "PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I" value: { singleSelectOptionId: "12a429e5" } }) { projectV2Item { id } } }'
           done
+      - name: Re-read board state before dispatch
+        id: dispatch_board
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          ITEMS=$(gh api graphql -f query='{ node(id: "PVT_kwHOBA7RLM4BVBrN") { ... on ProjectV2 { items(first: 100) { nodes { id content { ... on Issue { number title body labels(first: 10) { nodes { name } } } } fieldValues(first: 10) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { field { ... on ProjectV2SingleSelectField { name } } name } } } } } } } }')
+          echo "$ITEMS" > /tmp/board.json
+          NEXT_COUNT=$(echo "$ITEMS" | jq '[.data.node.items.nodes[] | select(.fieldValues.nodes[] | select(.name? == "Next"))] | length')
+          DOING_COUNT=$(echo "$ITEMS" | jq '[.data.node.items.nodes[] | select(.fieldValues.nodes[] | select(.name? == "Doing"))] | length')
+          echo "next=$NEXT_COUNT" >> $GITHUB_OUTPUT
+          echo "doing=$DOING_COUNT" >> $GITHUB_OUTPUT
       - name: Build
-        if: steps.board.outputs.next > 0 && steps.board.outputs.doing < env.MAX_CONCURRENT_BUILDS
+        if: steps.dispatch_board.outputs.next > 0 && steps.dispatch_board.outputs.doing < env.MAX_CONCURRENT_BUILDS
         env:
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
         run: |
