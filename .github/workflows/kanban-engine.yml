@@ -1,7 +1,7 @@
 name: Kanban Build Engine
 on:
-  schedule:
-    - cron: '*/15 * * * *'
+  # schedule:
+  #   - cron: '*/15 * * * *'  # Disabled until Claude Code GitHub App is installed
   workflow_dispatch:
 env:
   PROJECT_ID: PVT_kwHOBA7RLM4BVBrN
@@ -20,6 +20,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Configure git identity
@@ -84,10 +85,23 @@ jobs:
         run: |
           gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBA7RLM4BVBrN" itemId: "'$ITEM_ID'" fieldId: "PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I" value: { singleSelectOptionId: "d0c5437c" } }) { projectV2Item { id } } }'
           gh issue comment $ISSUE_NUM --repo mishanovini/ai-helm --body '## Ready for Review. _Automated_'
-      - name: Fail
+      - name: Handle build failure
         if: env.ISSUE_NUM != '' && failure()
         env:
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
         run: |
-          gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBA7RLM4BVBrN" itemId: "'$ITEM_ID'" fieldId: "PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I" value: { singleSelectOptionId: "12a429e5" } }) { projectV2Item { id } } }'
-          gh issue comment $ISSUE_NUM --repo mishanovini/ai-helm --body '## Build Failed. Back to Next. _Automated_'
+          FAIL_COUNT=$(gh api repos/mishanovini/ai-helm/issues/$ISSUE_NUM/comments --jq '[.[] | select(.body | startswith("## Build Failed"))] | length')
+          if [ "$FAIL_COUNT" -ge 2 ]; then
+            gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBA7RLM4BVBrN" itemId: "'$ITEM_ID'" fieldId: "PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I" value: { singleSelectOptionId: "dc069ef9" } }) { projectV2Item { id } } }'
+            gh issue edit "$ISSUE_NUM" --repo mishanovini/ai-helm --remove-label "implementing" --add-label "build-blocked" 2>/dev/null || true
+            gh issue comment "$ISSUE_NUM" --repo mishanovini/ai-helm --body "## Build Blocked
+          Build has failed 3 times. Moving to Backlog for manual investigation.
+          _Automated_"
+          else
+            ATTEMPT=$((FAIL_COUNT + 1))
+            gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBA7RLM4BVBrN" itemId: "'$ITEM_ID'" fieldId: "PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I" value: { singleSelectOptionId: "12a429e5" } }) { projectV2Item { id } } }'
+            gh issue edit "$ISSUE_NUM" --repo mishanovini/ai-helm --remove-label "implementing" 2>/dev/null || true
+            gh issue comment "$ISSUE_NUM" --repo mishanovini/ai-helm --body "## Build Failed (attempt $ATTEMPT/3)
+          Moving back to Next for retry.
+          _Automated_"
+          fi
