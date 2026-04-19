@@ -1,0 +1,78 @@
+name: Kanban Build Engine
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+env:
+  PROJECT_ID: PVT_kwHOBA7RLM4BVBrN
+  STATUS_FIELD_ID: PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I
+  BACKLOG_ID: dc069ef9
+  PLANNING_ID: 2396ef0f
+  NEXT_ID: 12a429e5
+  DOING_ID: 890a7222
+  VERIFICATION_ID: d0c5437c
+  DONE_ID: 0231e27f
+  MAX_CONCURRENT_BUILDS: 3
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read board
+        id: board
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          ITEMS=$(gh api graphql -f query='{ node(id: "PVT_kwHOBA7RLM4BVBrN") { ... on ProjectV2 { items(first: 100) { nodes { id content { ... on Issue { number title body labels(first: 10) { nodes { name } } } } fieldValues(first: 10) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { field { ... on ProjectV2SingleSelectField { name } } name } } } } } } } }')
+          echo "$ITEMS" > /tmp/board.json
+          echo "planning=$(echo $ITEMS | jq '[.data.node.items.nodes[] | select(.fieldValues.nodes[] | select(.name? == "Planning"))] | length')" >> $GITHUB_OUTPUT
+          echo "next=$(echo $ITEMS | jq '[.data.node.items.nodes[] | select(.fieldValues.nodes[] | select(.name? == "Next"))] | length')" >> $GITHUB_OUTPUT
+          echo "doing=$(echo $ITEMS | jq '[.data.node.items.nodes[] | select(.fieldValues.nodes[] | select(.name? == "Doing"))] | length')" >> $GITHUB_OUTPUT
+      - name: Process Planning
+        if: steps.board.outputs.planning > 0
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          cat /tmp/board.json | jq -c '[.data.node.items.nodes[] | select(.fieldValues.nodes[] | select(.name? == "Planning"))] | .[]' | while read -r item; do
+            ITEM_ID=$(echo $item | jq -r '.id')
+            ISSUE_NUM=$(echo $item | jq -r '.content.number')
+            gh issue comment $ISSUE_NUM --repo mishanovini/ai-helm --body '## Moving to Next. _Automated_'
+            gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBA7RLM4BVBrN" itemId: "'$ITEM_ID'" fieldId: "PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I" value: { singleSelectOptionId: "12a429e5" } }) { projectV2Item { id } } }'
+          done
+      - name: Build
+        if: steps.board.outputs.next > 0 && steps.board.outputs.doing < env.MAX_CONCURRENT_BUILDS
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          ITEM=$(cat /tmp/board.json | jq -c '[.data.node.items.nodes[] | select(.fieldValues.nodes[] | select(.name? == "Next"))] | .[0]')
+          ITEM_ID=$(echo $ITEM | jq -r '.id'); ISSUE_NUM=$(echo $ITEM | jq -r '.content.number'); TITLE=$(echo $ITEM | jq -r '.content.title')
+          [ "$ITEM_ID" = "null" ] && exit 0
+          gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBA7RLM4BVBrN" itemId: "'$ITEM_ID'" fieldId: "PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I" value: { singleSelectOptionId: "890a7222" } }) { projectV2Item { id } } }'
+          gh issue comment $ISSUE_NUM --repo mishanovini/ai-helm --body '## Build Started. _Automated_'
+          echo "ISSUE_NUM=$ISSUE_NUM" >> $GITHUB_ENV; echo "ITEM_ID=$ITEM_ID" >> $GITHUB_ENV; echo "TITLE=$TITLE" >> $GITHUB_ENV
+      - name: Claude Code
+        if: env.ISSUE_NUM != ''
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: 'Build Issue #${{ env.ISSUE_NUM }}: ${{ env.TITLE }}. Read Issue body. Diagnostic-first. Commit referencing Issue. Create PR.'
+          max_turns: 50
+          timeout_minutes: 30
+      - name: Verify
+        if: env.ISSUE_NUM != '' && success()
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBA7RLM4BVBrN" itemId: "'$ITEM_ID'" fieldId: "PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I" value: { singleSelectOptionId: "d0c5437c" } }) { projectV2Item { id } } }'
+          gh issue comment $ISSUE_NUM --repo mishanovini/ai-helm --body '## Ready for Review. _Automated_'
+      - name: Fail
+        if: env.ISSUE_NUM != '' && failure()
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBA7RLM4BVBrN" itemId: "'$ITEM_ID'" fieldId: "PVTSSF_lAHOBA7RLM4BVBrNzhQgT-I" value: { singleSelectOptionId: "12a429e5" } }) { projectV2Item { id } } }'
+          gh issue comment $ISSUE_NUM --repo mishanovini/ai-helm --body '## Build Failed. Back to Next. _Automated_'
