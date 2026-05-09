@@ -336,6 +336,18 @@ export async function runConsolidatedAnalysis(
     // Validate with Zod
     const result = consolidatedSchema.parse(parsed);
 
+    // Derive the overall prompt-quality score from the three subcategories so
+    // the displayed score always matches the bars the user sees. The LLM was
+    // given strict 0-100 calibration bands for `score` but no calibration for
+    // clarity/specificity/actionability, so its self-reported `score` drifted
+    // low while the subcategory bars stayed high. Averaging the subscores
+    // (which the LLM scores on a single consistent mental model) anchors the
+    // headline number to the visible breakdown.
+    const { clarity, specificity, actionability } = result.promptQuality;
+    result.promptQuality.score = Math.round(
+      (clarity + specificity + actionability) / 3,
+    );
+
     // Select block reason when security score is high enough to block
     let blockReasonId: string | undefined;
     let finalSecurityExplanation = result.securityExplanation;
