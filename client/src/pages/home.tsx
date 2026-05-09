@@ -686,9 +686,9 @@ export default function Home() {
 
             {/* Analysis Panel — narrower side panel (30%) */}
             <ResizablePanel defaultSize={30} minSize={20}>
-              <ScrollArea className="h-full pr-4">
+              <div className="h-full overflow-y-auto overflow-x-hidden pr-4">
                 <AnalysisDashboard data={analysisData} />
-              </ScrollArea>
+              </div>
             </ResizablePanel>
           </ResizablePanelGroup>
         </div>

@@ -263,7 +263,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
     : null;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 min-w-0 max-w-full">
       <h2 className="text-sm font-semibold flex items-center gap-1.5 mb-1">
         <CompassRose size={16} className="text-primary" />
         Analysis
@@ -354,12 +354,12 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                     )}
                   </div>
                   {data.reasoning && (
-                    <p className="text-xs text-muted-foreground leading-relaxed" data-testid="text-model-reasoning">
+                    <p className="text-xs text-muted-foreground leading-relaxed break-words" data-testid="text-model-reasoning">
                       {data.reasoning}
                     </p>
                   )}
                   {data.fallbackModel && (
-                    <p className="text-[10px] text-muted-foreground/70">
+                    <p className="text-[10px] text-muted-foreground/70 break-words">
                       Fallback: {data.fallbackModel}
                     </p>
                   )}
@@ -418,9 +418,9 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                     <p className="text-[10px] font-medium text-muted-foreground mb-1">Suggestions</p>
                     <ul className="space-y-0.5">
                       {data.promptQuality.suggestions.map((suggestion, i) => (
-                        <li key={i} className="text-[10px] text-muted-foreground flex gap-1.5">
+                        <li key={i} className="text-[10px] text-muted-foreground flex gap-1.5 min-w-0">
                           <span className="text-primary shrink-0">•</span>
-                          {suggestion}
+                          <span className="break-words min-w-0">{suggestion}</span>
                         </li>
                       ))}
                     </ul>
@@ -507,7 +507,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 </button>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <div className="px-3 py-2 text-xs text-muted-foreground border border-t-0 rounded-b-md bg-card">
+                <div className="px-3 py-2 text-xs text-muted-foreground border border-t-0 rounded-b-md bg-card break-words">
                   {data.securityExplanation || "No security concerns detected."}
                 </div>
               </CollapsibleContent>
@@ -595,7 +595,7 @@ export default function AnalysisDashboard({ data }: AnalysisDashboardProps) {
                 {/* Intent */}
                 <div>
                   <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Intent</label>
-                  <p className="text-xs mt-0.5" data-testid="text-intent">
+                  <p className="text-xs mt-0.5 break-words" data-testid="text-intent">
                     {data.intent || <span className="text-muted-foreground animate-pulse">Analyzing...</span>}
                   </p>
                 </div>
